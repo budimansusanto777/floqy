@@ -522,44 +522,35 @@ struct NotchAlertView: View {
     }
 }
 
-/// Multi-bar kinetic indicator that respects Reduce Motion.
+/// Multi-bar kinetic indicator that respects Reduce Motion without sticky CoreAnimation loops.
 struct EqualizerBarsView: View {
     let isPlaying: Bool
     var barCount: Int = 4
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pulse = false
 
     private let restHeights: [CGFloat] = [5, 8, 6, 7]
     private let activeHeightsA: [CGFloat] = [12, 7, 14, 9]
-    private let activeHeightsB: [CGFloat] = [6, 13, 8, 12]
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 2) {
-            ForEach(0..<max(1, min(4, barCount)), id: \.self) { index in
-                Capsule()
-                    .fill(NotchColors.accentPrimary)
-                    .frame(width: 2.5, height: barHeight(at: index))
-                    .animation(barAnimation(at: index), value: pulse)
+        let count = max(1, min(4, barCount))
+        TimelineView(.animation(paused: !isPlaying || reduceMotion)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            HStack(alignment: .bottom, spacing: 2) {
+                ForEach(0..<count, id: \.self) { index in
+                    Capsule()
+                        .fill(NotchColors.accentPrimary)
+                        .frame(width: 2.5, height: barHeight(at: index, time: t))
+                }
             }
-        }
-        .onAppear {
-            if isPlaying && !reduceMotion {
-                pulse = true
-            }
-        }
-        .onChange(of: isPlaying) { _, playing in
-            pulse = playing && !reduceMotion
         }
     }
 
-    private func barHeight(at index: Int) -> CGFloat {
+    private func barHeight(at index: Int, time: TimeInterval) -> CGFloat {
         guard isPlaying else { return restHeights[index] }
         if reduceMotion { return activeHeightsA[index] }
-        return pulse ? activeHeightsA[index] : activeHeightsB[index]
-    }
-
-    private func barAnimation(at index: Int) -> Animation? {
-        guard isPlaying, !reduceMotion else { return .easeOut(duration: 0.15) }
-        return .easeInOut(duration: 0.42 + Double(index) * 0.09).repeatForever(autoreverses: true)
+        let speed = 5.4 + Double(index) * 1.15
+        let phase = Double(index) * 1.35
+        let wave = (sin(time * speed + phase) + 1) * 0.5
+        return 5.5 + CGFloat(wave) * 8.5
     }
 }

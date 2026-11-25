@@ -88,36 +88,50 @@ struct NotchRootView: View {
         )
     }
 
-    private var contentTransition: AnyTransition {
+    private var shellAnimation: Animation {
+        let expanding = manager.mode.isExpanded || manager.mode.isAlert
         if reduceMotion {
-            return .identity
+            return .easeInOut(duration: expanding ? 0.16 : 0.14)
         }
-        return .asymmetric(
-            insertion: .opacity.animation(.easeOut(duration: 0.16).delay(0.05)),
-            removal: .identity
-        )
+        return expanding
+            ? .spring(response: 0.34, dampingFraction: 0.85)
+            : .spring(response: 0.24, dampingFraction: 0.98)
     }
 
     var body: some View {
         let activeTheme = manager.effectiveThemePreset
         let palette = NotchColors.palette(for: activeTheme)
+        let animKey = ShellAnimationKey(
+            totalWidth: totalWidth,
+            shellHeight: shellSize.height,
+            earRadius: earRadius,
+            bottomRadius: bottomRadius,
+            taperedChinInset: taperedChinInset,
+            leftLeadingInset: leftLeadingInset,
+            activeTheme: activeTheme,
+            isDragTargeted: manager.isDragTargeted
+        )
 
         ZStack(alignment: .top) {
-            palette.notchBackground
+            // 1. Background layer (animates shell geometry cleanly with spring).
+            ZStack(alignment: .top) {
+                palette.notchBackground
 
-            if activeTheme.usesWallpaper, let image = manager.wallpaperImage {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: totalWidth, height: shellSize.height)
-                    .clipped()
+                if activeTheme.usesWallpaper, let image = manager.wallpaperImage {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: totalWidth, height: shellSize.height)
+                        .clipped()
 
-                palette.wallpaperScrim
+                    palette.wallpaperScrim
+                }
             }
-        }
-        .frame(width: totalWidth, height: shellSize.height)
-        .overlay(alignment: .top) {
-            // Keep each mode view at its natural fixed frame so collapsing never crushes child layouts.
+            .frame(width: totalWidth, height: shellSize.height, alignment: .top)
+            .clipShape(shellShape)
+            .animation(shellAnimation, value: animKey)
+
+            // 2. Content layer (synchronous teardown on frame 0 so outgoing mode views never overlap).
             Group {
                 switch manager.mode {
                 case .idle:
@@ -127,7 +141,6 @@ struct NotchRootView: View {
                         hardware: manager.hardware
                     )
                     .frame(width: idleSize.width, height: idleSize.height)
-                    .transition(.opacity)
                 case .compact(let activity):
                     let activityCompactSize = manager.geometry.shellSize(for: .compact(activity))
                     NotchCompactView(
@@ -139,35 +152,45 @@ struct NotchRootView: View {
                         activity: activity
                     )
                     .frame(width: activityCompactSize.width, height: activityCompactSize.height)
-                    .compositingGroup()
-                    .transition(contentTransition)
                 case .alert(let alert):
                     let alertSize = manager.geometry.shellSize(for: .alert(alert))
                     NotchAlertView(manager: manager, alert: alert)
                         .frame(width: alertSize.width, height: alertSize.height)
-                        .compositingGroup()
-                        .transition(contentTransition)
                 case .expanded:
                     NotchExpandedView(manager: manager)
                         .frame(width: expandedSize.width, height: expandedSize.height)
-                        .compositingGroup()
-                        .transition(contentTransition)
                 }
             }
-            .frame(width: totalWidth, height: shellSize.height, alignment: .top)
-            .clipped()
-        }
-        .clipShape(shellShape)
-        .overlay(
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .mask(alignment: .top) {
+                shellShape
+                    .frame(width: totalWidth, height: shellSize.height, alignment: .top)
+                    .animation(shellAnimation, value: animKey)
+            }
+
+            // 3. Border stroke layer.
             shellShape
                 .stroke(
                     manager.isDragTargeted ? palette.accentPrimary : palette.shellBorder,
                     lineWidth: manager.isDragTargeted ? 1.5 : (activeTheme == .obsidian ? 0 : 1)
                 )
-        )
-        .frame(width: totalWidth, height: shellSize.height, alignment: .top)
+                .frame(width: totalWidth, height: shellSize.height, alignment: .top)
+                .allowsHitTesting(false)
+                .animation(shellAnimation, value: animKey)
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.notchThemePreset, activeTheme)
         .preferredColorScheme(activeTheme.isLight ? .light : .dark)
     }
+}
+
+private struct ShellAnimationKey: Equatable {
+    let totalWidth: CGFloat
+    let shellHeight: CGFloat
+    let earRadius: CGFloat
+    let bottomRadius: CGFloat
+    let taperedChinInset: CGFloat
+    let leftLeadingInset: CGFloat
+    let activeTheme: NotchThemePreset
+    let isDragTargeted: Bool
 }

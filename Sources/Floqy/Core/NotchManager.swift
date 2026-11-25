@@ -341,12 +341,9 @@ final class NotchManager: ObservableObject {
             idleWidth: idleWidth
         )
         let currentFrame = panel?.frame ?? targetFrame
-        let targetArea = targetFrame.width * targetFrame.height
-        let currentArea = currentFrame.width * currentFrame.height
         let isGrowing = targetFrame.width > currentFrame.width || targetFrame.height > currentFrame.height
         let isOffCenter = abs(currentFrame.midX - geometry.screenFrame.midX) > 1
             || abs(currentFrame.maxY - geometry.screenFrame.maxY) > 1
-        let isExpanding = targetArea >= currentArea
 
         if isGrowing || isOffCenter {
             // Grow (or re-center) atomically before animating so SwiftUI never clips or drifts off center.
@@ -359,18 +356,8 @@ final class NotchManager: ObservableObject {
             resizePanelAtomically(to: geometry.centeredFrame(size: immediateSize))
         }
 
-        let animation: Animation
-        if reduceMotion {
-            animation = .easeInOut(duration: isExpanding ? 0.16 : 0.14)
-        } else if isExpanding {
-            animation = .spring(response: 0.34, dampingFraction: 0.85)
-        } else {
-            animation = .spring(response: 0.24, dampingFraction: 0.98)
-        }
-
-        withAnimation(animation) {
-            stateMutation()
-        }
+        // Mutate state outside withAnimation so outgoing mode views tear down immediately while only the shell animates.
+        stateMutation()
         syncPanelFocusAbility()
         updateTrackingRect?()
 

@@ -1685,7 +1685,7 @@ struct ClipboardTabView: View {
                 HStack(spacing: 7) {
                     Text(entry.kind.rawValue)
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundStyle(NotchColors.notchBackground)
+                        .foregroundStyle(NotchColors.accentForeground)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
                         .background(RoundedRectangle(cornerRadius: 4).fill(NotchColors.accentPrimary))
