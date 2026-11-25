@@ -1,8 +1,9 @@
 import EventKit
 import SwiftUI
 
-/// Shared card container with verified dark surface and border contrast.
+/// Shared card container with theme-matched surface and border contrast.
 struct NotchCard<Content: View>: View {
+    @Environment(\.notchThemePreset) private var themePreset
     private let content: Content
 
     init(@ViewBuilder content: () -> Content) {
@@ -10,16 +11,23 @@ struct NotchCard<Content: View>: View {
     }
 
     var body: some View {
+        let palette = NotchColors.palette(for: themePreset)
         content
             .padding(11)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(NotchColors.cardSurface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(NotchColors.cardBorder, lineWidth: 1)
-                    )
+                ZStack {
+                    if palette.usesFrostedCards {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                    }
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(palette.cardSurface)
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(palette.cardBorder, lineWidth: 1)
+                )
             )
     }
 }
@@ -35,7 +43,7 @@ private struct PhaseBadge: View {
             .padding(.vertical, 2)
             .background(
                 Capsule()
-                    .fill(Color.white.opacity(0.06))
+                    .fill(NotchColors.controlSurface)
                     .overlay(Capsule().stroke(NotchColors.cardBorder, lineWidth: 1))
             )
     }
@@ -332,7 +340,7 @@ struct HomeTabView: View {
         .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white.opacity(0.04))
+                .fill(NotchColors.controlSubtle)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(NotchColors.cardBorder, lineWidth: 1)
@@ -368,7 +376,7 @@ struct HomeTabView: View {
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
                                 Capsule()
-                                    .fill(Color.white.opacity(0.14))
+                                    .fill(NotchColors.trackBackground)
                                 Capsule()
                                     .fill(NotchColors.accentPrimary)
                                     .frame(width: max(4, geo.size.width * track.progress))
@@ -477,7 +485,7 @@ struct HomeTabView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
         } else {
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white.opacity(0.08))
+                .fill(NotchColors.controlSurface)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(NotchColors.cardBorder, lineWidth: 1)
@@ -781,11 +789,11 @@ struct FilesTabView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(
                             RoundedRectangle(cornerRadius: 11)
-                                .fill(Color.white.opacity(0.025))
+                                .fill(NotchColors.controlSubtle)
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 11)
                                         .strokeBorder(
-                                            Color.white.opacity(0.2),
+                                            NotchColors.controlBorder.opacity(0.75),
                                             style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])
                                         )
                                 )
@@ -902,7 +910,7 @@ struct FilesTabView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(isSelected ? Color.white.opacity(0.11) : Color.white.opacity(0.04))
+                .fill(isSelected ? NotchColors.controlSelected : NotchColors.controlSubtle)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(isSelected ? NotchColors.accentPrimary : NotchColors.cardBorder, lineWidth: 1)
@@ -1043,7 +1051,7 @@ struct NotesTabView: View {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule()
-                            .fill(Color.white.opacity(0.12))
+                            .fill(NotchColors.trackBackground)
                         Capsule()
                             .fill(NotchColors.focusAccent)
                             .frame(width: max(4, geo.size.width * elapsedFraction))
@@ -1057,7 +1065,7 @@ struct NotesTabView: View {
     private func roundNode(label: String, isDone: Bool, isActive: Bool) -> some View {
         VStack(spacing: 4) {
             Circle()
-                .fill(isDone ? NotchColors.focusAccent : (isActive ? NotchColors.textPrimary : Color.white.opacity(0.2)))
+                .fill(isDone ? NotchColors.focusAccent : (isActive ? NotchColors.textPrimary : NotchColors.controlBorder.opacity(0.75)))
                 .frame(width: isActive ? 9 : 7, height: isActive ? 9 : 7)
                 .overlay(
                     Circle()
@@ -1080,7 +1088,7 @@ struct NotesTabView: View {
                         paneSwitchButton("Notes", pane: .notes)
                     }
                     .padding(2)
-                    .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.06)))
+                    .background(RoundedRectangle(cornerRadius: 7).fill(NotchColors.controlSurface))
 
                     Spacer(minLength: 4)
 
@@ -1132,7 +1140,7 @@ struct NotesTabView: View {
                 .padding(.vertical, 3)
                 .background(
                     RoundedRectangle(cornerRadius: 5)
-                        .fill(isSelected ? Color.white.opacity(0.15) : Color.clear)
+                        .fill(isSelected ? NotchColors.controlSelected : Color.clear)
                 )
         }
         .buttonStyle(.plain)
@@ -1150,7 +1158,7 @@ struct NotesTabView: View {
                     .padding(.vertical, 4)
                     .background(
                         RoundedRectangle(cornerRadius: 7)
-                            .fill(Color.white.opacity(0.06))
+                            .fill(NotchColors.controlSurface)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 7)
                                     .stroke(NotchColors.accentPrimary, lineWidth: 1)
@@ -1191,7 +1199,7 @@ struct NotesTabView: View {
                                     ZStack {
                                         Circle()
                                             .stroke(
-                                                item.isDone ? NotchColors.statusHealthy : Color.white.opacity(0.36),
+                                                item.isDone ? NotchColors.statusHealthy : NotchColors.controlBorder,
                                                 lineWidth: 1.5
                                             )
                                             .background(
@@ -1232,7 +1240,7 @@ struct NotesTabView: View {
                         .padding(.vertical, 5)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
-                                .fill(item.isDone ? NotchColors.statusHealthy.opacity(0.14) : Color.white.opacity(0.055))
+                                .fill(item.isDone ? NotchColors.statusHealthy.opacity(0.14) : NotchColors.controlSurface)
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 8)
                                         .stroke(
@@ -1267,7 +1275,7 @@ struct NotesTabView: View {
                 .padding(.vertical, 3)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.white.opacity(0.06))
+                        .fill(NotchColors.controlSurface)
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(NotchColors.cardBorder, lineWidth: 1))
                 )
             }
@@ -1297,7 +1305,7 @@ struct NotesTabView: View {
                     .frame(width: 22, height: 22)
                     .background(
                         RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.white.opacity(0.06))
+                            .fill(NotchColors.controlSurface)
                             .overlay(RoundedRectangle(cornerRadius: 6).stroke(NotchColors.cardBorder, lineWidth: 1))
                     )
             }
@@ -1321,7 +1329,7 @@ struct NotesTabView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.white.opacity(0.06))
+                        .fill(NotchColors.controlSurface)
                         .overlay(
                             RoundedRectangle(cornerRadius: 8)
                                 .stroke(NotchColors.accentPrimary, lineWidth: 1)
@@ -1346,7 +1354,7 @@ struct NotesTabView: View {
                     .padding(8)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.white.opacity(0.04))
+                            .fill(NotchColors.controlSubtle)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8)
                                     .stroke(NotchColors.cardBorder, lineWidth: 1)
@@ -1422,7 +1430,7 @@ struct NotesTabView: View {
                     .padding(.vertical, 2)
                     .background(
                         RoundedRectangle(cornerRadius: 7)
-                            .fill(Color.white.opacity(0.06))
+                            .fill(NotchColors.controlSurface)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 7)
                                     .stroke(NotchColors.focusAccent, lineWidth: 1)
@@ -1594,7 +1602,7 @@ struct ClipboardTabView: View {
                         .padding(.vertical, 4)
                         .background(
                             RoundedRectangle(cornerRadius: 7)
-                                .fill(Color.white.opacity(0.06))
+                                .fill(NotchColors.controlSurface)
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 7)
                                         .stroke(isSearching ? NotchColors.accentPrimary : NotchColors.cardBorder, lineWidth: 1)
@@ -1616,7 +1624,7 @@ struct ClipboardTabView: View {
                             .padding(.vertical, 4)
                             .background(
                                 RoundedRectangle(cornerRadius: 7)
-                                    .fill(Color.white.opacity(0.04))
+                                    .fill(NotchColors.controlSubtle)
                                     .overlay(RoundedRectangle(cornerRadius: 7).stroke(NotchColors.cardBorder, lineWidth: 1))
                             )
                         }
@@ -1727,7 +1735,7 @@ struct ClipboardTabView: View {
         .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white.opacity(0.04))
+                .fill(NotchColors.controlSubtle)
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(NotchColors.cardBorder, lineWidth: 1))
         )
     }
@@ -1791,7 +1799,7 @@ struct AITabView: View {
                             Capsule().fill(
                                 ai.workingAgent != nil
                                     ? NotchColors.accentPrimary.opacity(0.16)
-                                    : Color.white.opacity(0.06)
+                                    : NotchColors.controlSurface
                             )
                         )
                 }
@@ -1952,7 +1960,7 @@ struct AITabView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 7)
-                .fill(Color.white.opacity(0.04))
+                .fill(NotchColors.controlSubtle)
                 .overlay(RoundedRectangle(cornerRadius: 7).stroke(NotchColors.cardBorder, lineWidth: 1))
         )
     }
@@ -2091,7 +2099,7 @@ struct SystemTabView: View {
                     .frame(width: max(0, proxy.size.width * compFrac))
                 Spacer(minLength: 0)
             }
-            .background(Color.white.opacity(0.08))
+            .background(NotchColors.controlSurface)
             .clipShape(Capsule())
         }
         .frame(height: 6)
@@ -2192,116 +2200,122 @@ struct InlineSettingsTabView: View {
         HStack(spacing: 10) {
             NotchCard {
                 VStack(alignment: .leading, spacing: 9) {
-                    Text("Idle Notch & Hardware")
+                    Text("Appearance & Idle")
                         .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(NotchColors.textSecondary)
+
+                    HStack(spacing: 8) {
+                        Text("Theme")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(NotchColors.textPrimary)
+                        Spacer(minLength: 8)
+                        Button {
+                            NotchPopupMenu.show(
+                                items: NotchThemePreset.allCases.map { ($0.title, $0) },
+                                selected: manager.themePreset
+                            ) { chosen in
+                                manager.themePreset = chosen
+                            }
+                        } label: {
+                            settingsDropdownLabel(manager.themePreset.title)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if manager.themePreset.usesWallpaper {
+                        HStack(spacing: 6) {
+                            Text("Wallpaper")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(NotchColors.textPrimary)
+                            Spacer(minLength: 6)
+                            Button("Choose…") {
+                                manager.chooseWallpaperImage()
+                            }
+                            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(NotchColors.textPrimary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3.5)
+
+                            if manager.wallpaperImage != nil {
+                                Button("Clear") {
+                                    manager.clearWallpaperImage()
+                                }
+                                .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(NotchColors.textSecondary)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3.5)
+                            }
+                        }
+                    } else {
+                        HStack(spacing: 8) {
+                            Text("Idle width")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(NotchColors.textPrimary)
+                            Spacer(minLength: 8)
+                            HStack(spacing: 2) {
+                                ForEach(IdleNotchWidth.allCases) { widthOption in
+                                    let selected = manager.idleWidth == widthOption
+                                    Button {
+                                        manager.idleWidth = widthOption
+                                    } label: {
+                                        Text(widthOption.title)
+                                            .font(.system(size: 10.5, weight: selected ? .semibold : .medium))
+                                            .foregroundStyle(selected ? NotchColors.textPrimary : NotchColors.textSecondary)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 3)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                                                    .fill(selected ? NotchColors.statusHealthy.opacity(0.24) : Color.clear)
+                                            )
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                                                    .strokeBorder(
+                                                        selected ? NotchColors.statusHealthy.opacity(0.75) : Color.clear,
+                                                        lineWidth: 1
+                                                    )
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(2)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(NotchColors.controlSurface)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .strokeBorder(NotchColors.cardBorder, lineWidth: 1)
+                            )
+                            .opacity(manager.idleAppearance.usesBottomChin ? 1 : 0.4)
+                            .disabled(!manager.idleAppearance.usesBottomChin)
+                        }
+                    }
 
                     HStack(spacing: 8) {
                         Text("Idle notch")
                             .font(.system(size: 11.5))
                             .foregroundStyle(NotchColors.textPrimary)
                         Spacer(minLength: 8)
-                        Menu {
-                            ForEach(IdleAppearance.allCases) { appearance in
-                                Button {
-                                    manager.idleAppearance = appearance
-                                } label: {
-                                    if manager.idleAppearance == appearance {
-                                        Label(appearance.title, systemImage: "checkmark")
-                                    } else {
-                                        Text(appearance.title)
-                                    }
-                                }
+                        Button {
+                            NotchPopupMenu.show(
+                                items: IdleAppearance.allCases.map { ($0.title, $0) },
+                                selected: manager.idleAppearance
+                            ) { chosen in
+                                manager.idleAppearance = chosen
                             }
                         } label: {
-                            HStack(spacing: 5) {
-                                Text(manager.idleAppearance.title)
-                                    .font(.system(size: 11, weight: .semibold))
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.system(size: 8.5, weight: .semibold))
-                                    .foregroundStyle(NotchColors.textSecondary)
-                            }
-                            .foregroundStyle(NotchColors.textPrimary)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(Color.white.opacity(0.08))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
-                            )
+                            settingsDropdownLabel(manager.idleAppearance.title)
                         }
-                        .menuStyle(.borderlessButton)
-                        .fixedSize()
+                        .buttonStyle(.plain)
                     }
-
-                    HStack(spacing: 8) {
-                        Text("Idle width")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(NotchColors.textPrimary)
-                        Spacer(minLength: 8)
-                        HStack(spacing: 2) {
-                            ForEach(IdleNotchWidth.allCases) { widthOption in
-                                let selected = manager.idleWidth == widthOption
-                                Button {
-                                    manager.idleWidth = widthOption
-                                } label: {
-                                    Text(widthOption.title)
-                                        .font(.system(size: 10.5, weight: selected ? .semibold : .medium))
-                                        .foregroundStyle(selected ? NotchColors.textPrimary : NotchColors.textSecondary)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 3)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 5.5, style: .continuous)
-                                                .fill(selected ? NotchColors.statusHealthy.opacity(0.24) : Color.clear)
-                                        )
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 5.5, style: .continuous)
-                                                .strokeBorder(
-                                                    selected ? NotchColors.statusHealthy.opacity(0.75) : Color.clear,
-                                                    lineWidth: 1
-                                                )
-                                        )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(2)
-                        .background(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(Color.white.opacity(0.06))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
-                        )
-                        .opacity(manager.idleAppearance.usesBottomChin ? 1 : 0.4)
-                        .disabled(!manager.idleAppearance.usesBottomChin)
-                    }
-
-                    toggleRow("Headphones connected card", isOn: $manager.headphonesCardEnabled)
-                    toggleRow("Charging status card", isOn: $manager.chargingCardEnabled)
-
-                    Spacer(minLength: 0)
-                }
-            }
-
-            NotchCard {
-                VStack(alignment: .leading, spacing: 9) {
-                    Text("Notch & Alerts")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(NotchColors.textSecondary)
-
-                    toggleRow("Auto-expand on hover", isOn: $manager.hoverToExpandEnabled)
-                    toggleRow("Notification sounds", isOn: $manager.alertSoundsEnabled)
-                    toggleRow("RAM ≥ \(SystemLogic.ramAlertThresholdPercent)% alert", isOn: $manager.ramAlertEnabled)
 
                     Spacer(minLength: 0)
 
                     HStack {
-                        Text("Calendar & Notes Folder")
+                        Text("Calendar & Notes")
                             .font(.system(size: 10.5))
                             .foregroundStyle(NotchColors.textSecondary)
                             .lineLimit(1)
@@ -2317,7 +2331,47 @@ struct InlineSettingsTabView: View {
                     }
                 }
             }
+
+            NotchCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Cards & Alerts")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(NotchColors.textSecondary)
+
+                    toggleRow("Headphones connected card", isOn: $manager.headphonesCardEnabled)
+                    toggleRow("Charging status card", isOn: $manager.chargingCardEnabled)
+                    toggleRow("Auto-expand on hover", isOn: $manager.hoverToExpandEnabled)
+                    toggleRow("Notification sounds", isOn: $manager.alertSoundsEnabled)
+                    toggleRow("RAM ≥ \(SystemLogic.ramAlertThresholdPercent)% alert", isOn: $manager.ramAlertEnabled)
+
+                    Spacer(minLength: 0)
+                }
+            }
         }
+    }
+
+    private func settingsDropdownLabel(_ title: String) -> some View {
+        let palette = NotchColors.palette(for: manager.effectiveThemePreset)
+        return HStack(spacing: 5) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 8.5, weight: .semibold))
+                .foregroundStyle(palette.textSecondary)
+        }
+        .foregroundStyle(palette.textPrimary)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(palette.controlSurface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .strokeBorder(palette.controlBorder.opacity(0.65), lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 
     private func toggleRow(_ title: String, isOn: Binding<Bool>) -> some View {

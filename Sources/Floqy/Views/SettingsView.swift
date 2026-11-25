@@ -18,6 +18,36 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("Notch Behavior") {
+                Picker("Theme", selection: $manager.themePreset) {
+                    ForEach(NotchThemePreset.allCases) { preset in
+                        Text(preset.title).tag(preset)
+                    }
+                }
+                if manager.themePreset.usesWallpaper {
+                    LabeledContent("Notch wallpaper") {
+                        HStack(spacing: 8) {
+                            if let image = manager.wallpaperImage {
+                                Image(nsImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 36, height: 20)
+                                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                            .strokeBorder(Color.secondary.opacity(0.35), lineWidth: 0.75)
+                                    )
+                            }
+                            Button("Choose Image…") {
+                                manager.chooseWallpaperImage()
+                            }
+                            if manager.wallpaperImage != nil {
+                                Button("Remove") {
+                                    manager.clearWallpaperImage()
+                                }
+                            }
+                        }
+                    }
+                }
                 Picker("Idle notch", selection: $manager.idleAppearance) {
                     ForEach(IdleAppearance.allCases) { appearance in
                         Text(appearance.title).tag(appearance)

@@ -59,8 +59,11 @@ final class NotchPassthroughContainerView<Content: View>: NSView {
 
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.masksToBounds = true
         registerForDraggedTypes([.fileURL])
 
+        hostingView.wantsLayer = true
+        hostingView.layer?.masksToBounds = true
         hostingView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(hostingView)
         NSLayoutConstraint.activate([

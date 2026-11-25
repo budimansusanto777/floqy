@@ -538,14 +538,14 @@ private struct MiniCatCompanion: View {
                 .fill(NotchColors.textPrimary)
                 .frame(width: 28, height: 15)
 
-            // Crisp dark eyes that follow cursor horizontally and blink periodically
+            // Crisp eyes that follow cursor horizontally and blink periodically
             HStack(spacing: 2.5) {
                 Circle()
-                    .fill(Color.black)
+                    .fill(NotchColors.petAccentCutout)
                     .frame(width: 1.8, height: 1.8)
                     .scaleEffect(y: blink ? 0.2 : 1.0, anchor: .center)
                 Circle()
-                    .fill(Color.black)
+                    .fill(NotchColors.petAccentCutout)
                     .frame(width: 1.8, height: 1.8)
                     .scaleEffect(y: blink ? 0.2 : 1.0, anchor: .center)
             }
@@ -615,23 +615,23 @@ private struct MiniDogCompanion: View {
                 .fill(NotchColors.textPrimary)
                 .frame(width: 30, height: 15)
 
-            // Dark separator defining the floppy ear against the white puppy silhouette
+            // Contrasting separator defining the floppy ear against the puppy silhouette
             DogEarOutlineShape()
                 .stroke(
-                    Color.black,
+                    NotchColors.petAccentCutout,
                     style: StrokeStyle(lineWidth: 1.0, lineCap: .round, lineJoin: .round)
                 )
                 .frame(width: 30, height: 15)
 
             // Eye and nose accents
             Circle()
-                .fill(Color.black)
+                .fill(NotchColors.petAccentCutout)
                 .frame(width: 1.8, height: 1.8)
                 .scaleEffect(y: blink ? 0.2 : 1.0, anchor: .center)
                 .offset(x: 19.0, y: 4.1)
 
             Circle()
-                .fill(Color.black)
+                .fill(NotchColors.petAccentCutout)
                 .frame(width: 1.9, height: 1.9)
                 .offset(x: 24.4, y: 5.1)
         }

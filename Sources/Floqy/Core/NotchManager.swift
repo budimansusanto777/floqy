@@ -3,6 +3,7 @@ import Carbon.HIToolbox
 import Combine
 import QuartzCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct MeetingHeadsUp: Equatable {
     let event: CalendarEventItem
@@ -18,10 +19,15 @@ final class NotchManager: ObservableObject {
     private static let restingEyesEnabledKey = "floqy.notch.restingEyesEnabled"
     private static let idleAppearanceKey = "floqy.notch.idleAppearance"
     private static let idleWidthKey = "floqy.notch.idleWidth"
+    private static let themePresetKey = "floqy.notch.themePreset"
     private static let headphonesCardEnabledKey = "floqy.hardware.headphonesCardEnabled"
     private static let chargingCardEnabledKey = "floqy.hardware.chargingCardEnabled"
 
-    @Published var mode: NotchMode = .idle
+    @Published var mode: NotchMode = .idle {
+        didSet {
+            NotchColors.activePreset = effectiveThemePreset
+        }
+    }
     @Published var activeTab: NotchTab = .home
     @Published var homeSubView: HomeSubView = .overview
     @Published var compactActivity: CompactActivity = .music
@@ -60,6 +66,16 @@ final class NotchManager: ObservableObject {
             }
         }
     }
+    @Published var themePreset: NotchThemePreset {
+        didSet {
+            NotchColors.activePreset = effectiveThemePreset
+            UserDefaults.standard.set(themePreset.rawValue, forKey: Self.themePresetKey)
+        }
+    }
+    var effectiveThemePreset: NotchThemePreset {
+        NotchThemePreset.resolved(for: mode, selected: themePreset)
+    }
+    @Published private(set) var wallpaperImage: NSImage?
 
     var restingEyesEnabled: Bool {
         idleAppearance.isVisible
@@ -103,6 +119,7 @@ final class NotchManager: ObservableObject {
     private var triggeredStartingMeetingIDs: Set<String> = []
     private(set) var isHoveringCompactControls: Bool = false
     private var isTrackingMenu: Bool = false
+    private var isPresentingFilePicker: Bool = false
     private var cancellables: Set<AnyCancellable> = []
     private var toggleHotKeyRef: EventHotKeyRef?
     private var clipboardHotKeyRef: EventHotKeyRef?
@@ -131,9 +148,19 @@ final class NotchManager: ObservableObject {
         } else {
             self.idleWidth = .compact
         }
+        let initialTheme: NotchThemePreset
+        if let savedThemeRaw = UserDefaults.standard.string(forKey: Self.themePresetKey),
+           let savedTheme = NotchThemePreset(rawValue: savedThemeRaw) {
+            initialTheme = savedTheme
+        } else {
+            initialTheme = .obsidian
+        }
+        self.themePreset = initialTheme
+        self.wallpaperImage = NSImage(contentsOf: Self.wallpaperStorageURL)
         self.headphonesCardEnabled = UserDefaults.standard.object(forKey: Self.headphonesCardEnabledKey) as? Bool ?? true
         self.chargingCardEnabled = UserDefaults.standard.object(forKey: Self.chargingCardEnabledKey) as? Bool ?? true
         self.geometry = NotchGeometry(screen: NotchGeometry.preferredScreen())
+        NotchColors.activePreset = NotchThemePreset.resolved(for: mode, selected: initialTheme)
     }
 
     deinit {
@@ -373,6 +400,7 @@ final class NotchManager: ObservableObject {
         CATransaction.setDisableActions(true)
         panel.setFrame(frame, display: true)
         panel.contentView?.layoutSubtreeIfNeeded()
+        panel.contentView?.needsDisplay = true
         panel.displayIfNeeded()
         CATransaction.commit()
         CATransaction.flush()
@@ -610,20 +638,120 @@ final class NotchManager: ObservableObject {
                 self.setMode(.expanded)
             }
         } else {
-            guard mode.isExpanded, !isEditingText, !isDragTargeted, !isTrackingMenu else { return }
+            guard mode.isExpanded, !isEditingText, !isDragTargeted, !isTrackingMenu, !isPresentingFilePicker else { return }
             hoverTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(240))
                 guard !Task.isCancelled,
                       let self,
                       !self.isEditingText,
                       !self.isDragTargeted,
-                      !self.isTrackingMenu else { return }
+                      !self.isTrackingMenu,
+                      !self.isPresentingFilePicker else { return }
                 if let panel = self.panel, panel.frame.contains(NSEvent.mouseLocation) {
                     return
                 }
                 self.collapse()
             }
         }
+    }
+
+    // MARK: - Custom Notch Wallpaper
+
+    private static var wallpaperStorageURL: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
+        return appSupport
+            .appendingPathComponent("Floqy", isDirectory: true)
+            .appendingPathComponent("notch-wallpaper.jpg")
+    }
+
+    func chooseWallpaperImage() {
+        hoverTask?.cancel()
+        isPresentingFilePicker = true
+        NSApp.activate(ignoringOtherApps: true)
+
+        let openPanel = NSOpenPanel()
+        openPanel.allowedContentTypes = [.image]
+        openPanel.allowsMultipleSelection = false
+        openPanel.canChooseDirectories = false
+        openPanel.prompt = "Choose"
+        openPanel.message = "Select an image to use as Floqy's notch wallpaper."
+
+        openPanel.begin { [weak self] response in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                defer { self.isPresentingFilePicker = false }
+                guard response == .OK,
+                      let selectedURL = openPanel.url,
+                      let sourceImage = NSImage(contentsOf: selectedURL),
+                      let prepared = Self.resizeWallpaperImage(sourceImage) else {
+                    return
+                }
+
+                let targetURL = Self.wallpaperStorageURL
+                try? FileManager.default.createDirectory(
+                    at: targetURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try? prepared.jpegData.write(to: targetURL, options: .atomic)
+
+                self.wallpaperImage = prepared.image
+                if !self.themePreset.usesWallpaper {
+                    self.themePreset = .wallpaperDark
+                }
+                self.showToast("Notch wallpaper updated")
+            }
+        }
+    }
+
+    func clearWallpaperImage() {
+        try? FileManager.default.removeItem(at: Self.wallpaperStorageURL)
+        wallpaperImage = nil
+        if themePreset == .wallpaperDark {
+            themePreset = .obsidian
+        } else if themePreset == .wallpaperLight {
+            themePreset = .pureWhite
+        }
+        showToast("Notch wallpaper cleared")
+    }
+
+    private static func resizeWallpaperImage(
+        _ image: NSImage,
+        maxDimension: CGFloat = 1280
+    ) -> (image: NSImage, jpegData: Data)? {
+        guard let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData) else { return nil }
+        let srcSize = CGSize(width: bitmap.pixelsWide, height: bitmap.pixelsHigh)
+        guard srcSize.width > 0, srcSize.height > 0 else { return nil }
+        let longest = max(srcSize.width, srcSize.height)
+        let scale = longest > maxDimension ? (maxDimension / longest) : 1.0
+        let targetSize = CGSize(
+            width: max(1, floor(srcSize.width * scale)),
+            height: max(1, floor(srcSize.height * scale))
+        )
+
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(targetSize.width),
+            pixelsHigh: Int(targetSize.height),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return nil }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.current?.imageInterpolation = .high
+        bitmap.draw(in: NSRect(origin: .zero, size: targetSize))
+        NSGraphicsContext.restoreGraphicsState()
+
+        guard let jpegData = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.86]),
+              let finalImage = NSImage(data: jpegData) else { return nil }
+        return (finalImage, jpegData)
     }
 
     // MARK: - Phase 2 Files Tray Staging

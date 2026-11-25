@@ -90,17 +90,32 @@ struct NotchRootView: View {
 
     private var contentTransition: AnyTransition {
         if reduceMotion {
-            return .opacity
+            return .identity
         }
         return .asymmetric(
             insertion: .opacity.animation(.easeOut(duration: 0.16).delay(0.05)),
-            removal: .opacity.animation(.easeIn(duration: 0.08))
+            removal: .identity
         )
     }
 
     var body: some View {
-        shellShape
-            .fill(NotchColors.notchBackground)
+        let activeTheme = manager.effectiveThemePreset
+        let palette = NotchColors.palette(for: activeTheme)
+
+        ZStack(alignment: .top) {
+            palette.notchBackground
+
+            if activeTheme.usesWallpaper, let image = manager.wallpaperImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: totalWidth, height: shellSize.height)
+                    .clipped()
+
+                palette.wallpaperScrim
+            }
+        }
+        .frame(width: totalWidth, height: shellSize.height)
         .overlay(alignment: .top) {
             // Keep each mode view at its natural fixed frame so collapsing never crushes child layouts.
             Group {
@@ -139,17 +154,20 @@ struct NotchRootView: View {
                         .transition(contentTransition)
                 }
             }
+            .frame(width: totalWidth, height: shellSize.height, alignment: .top)
+            .clipped()
         }
         .clipShape(shellShape)
         .overlay(
             shellShape
                 .stroke(
-                    manager.isDragTargeted ? NotchColors.accentPrimary : Color.clear,
-                    lineWidth: manager.isDragTargeted ? 1.5 : 0
+                    manager.isDragTargeted ? palette.accentPrimary : palette.shellBorder,
+                    lineWidth: manager.isDragTargeted ? 1.5 : (activeTheme == .obsidian ? 0 : 1)
                 )
         )
         .frame(width: totalWidth, height: shellSize.height, alignment: .top)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .preferredColorScheme(.dark)
+        .environment(\.notchThemePreset, activeTheme)
+        .preferredColorScheme(activeTheme.isLight ? .light : .dark)
     }
 }

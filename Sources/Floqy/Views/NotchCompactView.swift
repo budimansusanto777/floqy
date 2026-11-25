@@ -83,7 +83,7 @@ struct NotchCompactView: View {
             HStack(spacing: 6) {
                 ZStack {
                     Circle()
-                        .stroke(Color.white.opacity(0.16), lineWidth: 2)
+                        .stroke(NotchColors.trackBackground, lineWidth: 2)
                     Circle()
                         .trim(from: 0, to: productivity.pomodoro.remainingProgress)
                         .stroke(ringColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
@@ -295,7 +295,7 @@ struct NotchAlertView: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.white.opacity(0.14))
+                        .fill(NotchColors.trackBackground)
                     RoundedRectangle(cornerRadius: 4)
                         .fill(NotchColors.statusHealthy)
                         .frame(width: max(6, geo.size.width * clampedFraction))
@@ -303,7 +303,7 @@ struct NotchAlertView: View {
                         ForEach(0..<3, id: \.self) { _ in
                             Spacer()
                             Rectangle()
-                                .fill(Color.black.opacity(0.6))
+                                .fill(NotchColors.notchBackground.opacity(0.6))
                                 .frame(width: 1)
                         }
                         Spacer()
@@ -375,10 +375,10 @@ struct NotchAlertView: View {
                 .frame(width: 36, height: 36)
                 .background(
                     Circle()
-                        .fill(Color(red: 0.09, green: 0.10, blue: 0.12))
+                        .fill(NotchColors.cardSurface)
                         .overlay(
                             Circle()
-                                .stroke(Color.white.opacity(0.11), lineWidth: 1)
+                                .stroke(NotchColors.cardBorder, lineWidth: 1)
                         )
                 )
         case .chargingConnected:
@@ -448,7 +448,7 @@ struct NotchAlertView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(NotchColors.notchBackground)
+                .foregroundStyle(.white)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 5)
                 .background(RoundedRectangle(cornerRadius: 7).fill(NotchColors.statusHealthy))
@@ -469,7 +469,7 @@ struct NotchAlertView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(NotchColors.notchBackground)
+                .foregroundStyle(NotchColors.accentForeground)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(RoundedRectangle(cornerRadius: 7).fill(NotchColors.accentPrimary))
@@ -500,7 +500,7 @@ struct NotchAlertView: View {
 
                     ZStack {
                         Circle()
-                            .stroke(Color.white.opacity(0.14), lineWidth: 2.5)
+                            .stroke(NotchColors.trackBackground, lineWidth: 2.5)
                         Circle()
                             .trim(from: 0, to: fraction)
                             .stroke(NotchColors.statusHealthy, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))

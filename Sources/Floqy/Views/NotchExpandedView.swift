@@ -85,7 +85,7 @@ struct NotchExpandedView: View {
                 if tab == .files && !filesTray.items.isEmpty {
                     Text("\(filesTray.items.count)")
                         .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(NotchColors.notchBackground)
+                        .foregroundStyle(NotchColors.accentForeground)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
                         .background(Capsule().fill(NotchColors.accentPrimary))

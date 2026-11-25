@@ -186,3 +186,40 @@ enum IdleNotchWidth: String, CaseIterable, Identifiable, Hashable {
         }
     }
 }
+
+/// Selectable visual themes for Floqy's notch shell, cards, and custom background image.
+enum NotchThemePreset: String, CaseIterable, Identifiable, Hashable {
+    case obsidian
+    case midnight
+    case pureWhite
+    case sakuraBlush
+    case roseVelvet
+    case wallpaperDark
+    case wallpaperLight
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .obsidian: return "Obsidian"
+        case .midnight: return "Midnight"
+        case .pureWhite: return "Pure White"
+        case .sakuraBlush: return "Sakura Blush"
+        case .roseVelvet: return "Rose Velvet"
+        case .wallpaperDark: return "Wallpaper (Dark)"
+        case .wallpaperLight: return "Wallpaper (Light)"
+        }
+    }
+
+    var isLight: Bool {
+        self == .pureWhite || self == .sakuraBlush || self == .wallpaperLight
+    }
+
+    var usesWallpaper: Bool {
+        self == .wallpaperDark || self == .wallpaperLight
+    }
+
+    static func resolved(for mode: NotchMode, selected: NotchThemePreset) -> NotchThemePreset {
+        mode.isExpanded ? selected : .obsidian
+    }
+}

@@ -523,6 +523,13 @@ enum CoreSelfCheck {
         precondition(IdleAppearance.cat.isSideWing && IdleAppearance.dog.isSideWing && !IdleAppearance.eyes.isSideWing, "Cat and Dog use single-row side wings")
         precondition(!IdleAppearance.cat.usesBottomChin && IdleAppearance.eyes.usesBottomChin, "Only non-wing visible idle styles use bottom chin")
         precondition(IdleNotchWidth.allCases.count == 2, "IdleNotchWidth must expose Compact and Full")
+        precondition(NotchThemePreset.allCases.count == 7, "NotchThemePreset must expose 7 presets")
+        precondition(NotchThemePreset.pureWhite.isLight && NotchThemePreset.sakuraBlush.isLight && NotchThemePreset.wallpaperLight.isLight, "Light theme flags mismatch")
+        precondition(!NotchThemePreset.obsidian.isLight && !NotchThemePreset.midnight.isLight && !NotchThemePreset.roseVelvet.isLight && !NotchThemePreset.wallpaperDark.isLight, "Dark theme flags mismatch")
+        precondition(NotchThemePreset.wallpaperDark.usesWallpaper && NotchThemePreset.wallpaperLight.usesWallpaper && !NotchThemePreset.sakuraBlush.usesWallpaper, "Wallpaper flag mismatch")
+        precondition(NotchThemePreset.resolved(for: .idle, selected: .pureWhite) == .obsidian, "Idle notch must keep Obsidian black")
+        precondition(NotchThemePreset.resolved(for: .compact(.music), selected: .sakuraBlush) == .obsidian, "Compact notch must keep Obsidian black")
+        precondition(NotchThemePreset.resolved(for: .expanded, selected: .pureWhite) == .pureWhite, "Expanded notch must apply selected theme")
 
         let eyesIdle = geometry.shellSize(for: .idle, idleAppearance: .eyes)
         precondition(eyesIdle.height == geometry.notchSafeTopHeight + 20, "Bottom-chin idle must extend 20pt below hardware camera")
