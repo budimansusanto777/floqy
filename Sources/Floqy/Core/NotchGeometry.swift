@@ -241,13 +241,45 @@ struct NotchGeometry: Equatable {
         return CGRect(x: originX, y: originY, width: activeWidth, height: shell.height)
     }
 
-    /// Preferred display: built-in notched display if present, otherwise the primary screen.
-    static func preferredScreen() -> NSScreen? {
-        if let notched = NSScreen.screens.first(where: {
-            $0.auxiliaryTopLeftArea != nil && $0.auxiliaryTopRightArea != nil
-        }) {
-            return notched
+    /// Pure screen-index resolver supporting Built-in Notch, Primary, and Follow-Cursor strategies.
+    static func resolveScreenIndex(
+        frames: [CGRect],
+        notchedIndices: Set<Int>,
+        preference: DisplayPreference,
+        cursor: CGPoint
+    ) -> Int? {
+        guard !frames.isEmpty else { return nil }
+        let primaryIndex = frames.firstIndex(where: { $0.origin == .zero }) ?? 0
+
+        switch preference {
+        case .builtInNotch:
+            return frames.indices.first(where: { notchedIndices.contains($0) }) ?? primaryIndex
+        case .primary:
+            return primaryIndex
+        case .followCursor:
+            return frames.indices.first(where: { frames[$0].contains(cursor) }) ?? primaryIndex
         }
-        return NSScreen.main ?? NSScreen.screens.first
+    }
+
+    /// Selects the host screen matching the user's multi-monitor DisplayPreference.
+    static func preferredScreen(
+        for preference: DisplayPreference = .builtInNotch,
+        mouseLocation: NSPoint = NSEvent.mouseLocation
+    ) -> NSScreen? {
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else { return NSScreen.main }
+        let frames = screens.map(\.frame)
+        let notched = Set(screens.indices.filter {
+            screens[$0].auxiliaryTopLeftArea != nil && screens[$0].auxiliaryTopRightArea != nil
+        })
+        if let index = resolveScreenIndex(
+            frames: frames,
+            notchedIndices: notched,
+            preference: preference,
+            cursor: mouseLocation
+        ) {
+            return screens[index]
+        }
+        return NSScreen.main ?? screens.first
     }
 }

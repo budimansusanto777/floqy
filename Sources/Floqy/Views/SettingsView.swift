@@ -63,6 +63,26 @@ struct SettingsView: View {
                 Toggle("Charging status card", isOn: $manager.chargingCardEnabled)
                 Toggle("Auto-expand on hover", isOn: $manager.hoverToExpandEnabled)
                 Toggle("Notification sounds", isOn: $manager.alertSoundsEnabled)
+                Toggle("Start Floqy at login", isOn: Binding(
+                    get: { manager.launchAtLoginEnabled },
+                    set: { manager.setLaunchAtLogin($0) }
+                ))
+                if manager.launchAtLoginNeedsApproval {
+                    HStack {
+                        Text("Requires approval in Login Items.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Open Login Items") {
+                            manager.openLoginItemsSettings()
+                        }
+                    }
+                }
+                if let loginError = manager.launchAtLoginError {
+                    Text(loginError)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 LabeledContent("Toggle Notch") {
                     Text("⌘ ⇧ Space")
@@ -162,6 +182,11 @@ struct SettingsView: View {
             }
 
             Section("Display Geometry") {
+                Picker("Display", selection: $manager.displayPreference) {
+                    ForEach(DisplayPreference.allCases) { pref in
+                        Text(pref.title).tag(pref)
+                    }
+                }
                 LabeledContent("Hardware Notch") {
                     Text(manager.geometry.hasHardwareNotch ? "Detected" : "Fallback Mode")
                         .foregroundStyle(manager.geometry.hasHardwareNotch ? .green : .secondary)
@@ -174,7 +199,7 @@ struct SettingsView: View {
             }
 
             Section("About Floqy") {
-                LabeledContent("Version", value: "0.4.0 (Phase 4)")
+                LabeledContent("Version", value: "1.0.0")
                 LabeledContent("License", value: "GNU GPLv3")
                 LabeledContent("Copyright", value: "© 2026 budimansusanto777")
             }

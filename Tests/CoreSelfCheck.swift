@@ -530,6 +530,28 @@ enum CoreSelfCheck {
         precondition(NotchThemePreset.resolved(for: .idle, selected: .pureWhite) == .obsidian, "Idle notch must keep Obsidian black")
         precondition(NotchThemePreset.resolved(for: .compact(.music), selected: .sakuraBlush) == .obsidian, "Compact notch must keep Obsidian black")
         precondition(NotchThemePreset.resolved(for: .expanded, selected: .pureWhite) == .pureWhite, "Expanded notch must apply selected theme")
+        precondition(DisplayPreference.allCases.count == 3, "DisplayPreference must expose Built-in, Primary, and Follow Cursor")
+
+        let monitorFrames = [
+            CGRect(x: 0, y: 0, width: 2560, height: 1440),
+            CGRect(x: -1512, y: 0, width: 1512, height: 982)
+        ]
+        precondition(
+            NotchGeometry.resolveScreenIndex(frames: monitorFrames, notchedIndices: [1], preference: .builtInNotch, cursor: CGPoint(x: 100, y: 100)) == 1,
+            "Built-in preference must choose the notched screen"
+        )
+        precondition(
+            NotchGeometry.resolveScreenIndex(frames: monitorFrames, notchedIndices: [1], preference: .primary, cursor: CGPoint(x: -400, y: 100)) == 0,
+            "Primary preference must choose origin .zero screen"
+        )
+        precondition(
+            NotchGeometry.resolveScreenIndex(frames: monitorFrames, notchedIndices: [1], preference: .followCursor, cursor: CGPoint(x: -300, y: 500)) == 1,
+            "Follow cursor must track cursor onto secondary display"
+        )
+        precondition(
+            NotchGeometry.resolveScreenIndex(frames: monitorFrames, notchedIndices: [1], preference: .followCursor, cursor: CGPoint(x: 400, y: 500)) == 0,
+            "Follow cursor must track cursor onto primary display"
+        )
 
         let eyesIdle = geometry.shellSize(for: .idle, idleAppearance: .eyes)
         precondition(eyesIdle.height == geometry.notchSafeTopHeight + 20, "Bottom-chin idle must extend 20pt below hardware camera")

@@ -2,6 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import Combine
 import QuartzCore
+import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -20,6 +21,7 @@ final class NotchManager: ObservableObject {
     private static let idleAppearanceKey = "floqy.notch.idleAppearance"
     private static let idleWidthKey = "floqy.notch.idleWidth"
     private static let themePresetKey = "floqy.notch.themePreset"
+    private static let displayPreferenceKey = "floqy.display.preference"
     private static let headphonesCardEnabledKey = "floqy.hardware.headphonesCardEnabled"
     private static let chargingCardEnabledKey = "floqy.hardware.chargingCardEnabled"
 
@@ -72,6 +74,16 @@ final class NotchManager: ObservableObject {
             UserDefaults.standard.set(themePreset.rawValue, forKey: Self.themePresetKey)
         }
     }
+    @Published var displayPreference: DisplayPreference {
+        didSet {
+            UserDefaults.standard.set(displayPreference.rawValue, forKey: Self.displayPreferenceKey)
+            relocateToPreferredScreen()
+            syncCursorScreenMonitor()
+        }
+    }
+    @Published private(set) var launchAtLoginEnabled: Bool = false
+    @Published private(set) var launchAtLoginNeedsApproval: Bool = false
+    @Published private(set) var launchAtLoginError: String?
     var effectiveThemePreset: NotchThemePreset {
         NotchThemePreset.resolved(for: mode, selected: themePreset)
     }
@@ -120,6 +132,8 @@ final class NotchManager: ObservableObject {
     private(set) var isHoveringCompactControls: Bool = false
     private var isTrackingMenu: Bool = false
     private var isPresentingFilePicker: Bool = false
+    private var cursorScreenMonitor: Any?
+    private var lastCursorScreenCheck: CFTimeInterval = 0
     private var cancellables: Set<AnyCancellable> = []
     private var toggleHotKeyRef: EventHotKeyRef?
     private var clipboardHotKeyRef: EventHotKeyRef?
@@ -155,15 +169,27 @@ final class NotchManager: ObservableObject {
         } else {
             initialTheme = .obsidian
         }
+        let initialDisplayPref: DisplayPreference
+        if let savedDisplayRaw = UserDefaults.standard.string(forKey: Self.displayPreferenceKey),
+           let savedDisplay = DisplayPreference(rawValue: savedDisplayRaw) {
+            initialDisplayPref = savedDisplay
+        } else {
+            initialDisplayPref = .builtInNotch
+        }
+        self.displayPreference = initialDisplayPref
         self.themePreset = initialTheme
         self.wallpaperImage = NSImage(contentsOf: Self.wallpaperStorageURL)
         self.headphonesCardEnabled = UserDefaults.standard.object(forKey: Self.headphonesCardEnabledKey) as? Bool ?? true
         self.chargingCardEnabled = UserDefaults.standard.object(forKey: Self.chargingCardEnabledKey) as? Bool ?? true
-        self.geometry = NotchGeometry(screen: NotchGeometry.preferredScreen())
+        self.geometry = NotchGeometry(screen: NotchGeometry.preferredScreen(for: initialDisplayPref))
         NotchColors.activePreset = NotchThemePreset.resolved(for: mode, selected: initialTheme)
+        refreshLaunchAtLoginStatus()
     }
 
     deinit {
+        if let cursorScreenMonitor {
+            NSEvent.removeMonitor(cursorScreenMonitor)
+        }
         if let screenObserver {
             NotificationCenter.default.removeObserver(screenObserver)
         }
@@ -188,11 +214,16 @@ final class NotchManager: ObservableObject {
         setupPanel()
         observeScreenChanges()
         observeMenuTracking()
+        syncCursorScreenMonitor()
         registerGlobalHotKeys()
         startServices()
     }
 
     func stop() {
+        if let cursorScreenMonitor {
+            NSEvent.removeMonitor(cursorScreenMonitor)
+            self.cursorScreenMonitor = nil
+        }
         hardware.stop()
         ai.stop()
         system.stop()
@@ -327,7 +358,7 @@ final class NotchManager: ObservableObject {
     ) {
         panelShrinkTask?.cancel()
 
-        let latestGeometry = NotchGeometry(screen: NotchGeometry.preferredScreen())
+        let latestGeometry = NotchGeometry(screen: NotchGeometry.preferredScreen(for: displayPreference))
         if latestGeometry != geometry {
             geometry = latestGeometry
         }
@@ -834,16 +865,69 @@ final class NotchManager: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.refreshGeometry()
-                let updated = self.geometry.panelFrame(
-                    for: self.mode,
-                    homeSubView: self.homeSubView,
-                    activeTab: self.activeTab,
-                    idleAppearance: self.idleAppearance,
-                    idleWidth: self.idleWidth
-                )
-                self.resizePanelAtomically(to: updated)
-                self.updateTrackingRect?()
+                self.relocateToPreferredScreen()
+                self.syncCursorScreenMonitor()
+            }
+        }
+    }
+
+    // MARK: - Launch at Login (SMAppService)
+
+    func refreshLaunchAtLoginStatus() {
+        let status = SMAppService.mainApp.status
+        launchAtLoginEnabled = (status == .enabled)
+        launchAtLoginNeedsApproval = (status == .requiresApproval)
+    }
+
+    func setLaunchAtLogin(_ enabled: Bool) {
+        launchAtLoginError = nil
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            launchAtLoginError = error.localizedDescription
+        }
+        refreshLaunchAtLoginStatus()
+    }
+
+    func openLoginItemsSettings() {
+        SMAppService.openSystemSettingsLoginItems()
+    }
+
+    private func relocateToPreferredScreen() {
+        refreshGeometry()
+        let effectiveSubView: HomeSubView = (mode.isExpanded && isShowingInlineSettings) ? .overview : homeSubView
+        let updated = geometry.panelFrame(
+            for: mode,
+            homeSubView: effectiveSubView,
+            activeTab: activeTab,
+            idleAppearance: idleAppearance,
+            idleWidth: idleWidth
+        )
+        resizePanelAtomically(to: updated)
+        updateTrackingRect?()
+    }
+
+    private func syncCursorScreenMonitor() {
+        if let cursorScreenMonitor {
+            NSEvent.removeMonitor(cursorScreenMonitor)
+            self.cursorScreenMonitor = nil
+        }
+        guard displayPreference == .followCursor, NSScreen.screens.count > 1 else { return }
+        cursorScreenMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let now = CACurrentMediaTime()
+                guard now - self.lastCursorScreenCheck >= 0.35 else { return }
+                self.lastCursorScreenCheck = now
+                guard !self.mode.isExpanded, !self.mode.isAlert else { return }
+                let candidate = NotchGeometry(screen: NotchGeometry.preferredScreen(for: .followCursor))
+                if candidate.screenFrame != self.geometry.screenFrame {
+                    self.relocateToPreferredScreen()
+                }
             }
         }
     }
@@ -871,7 +955,7 @@ final class NotchManager: ObservableObject {
     }
 
     private func refreshGeometry() {
-        geometry = NotchGeometry(screen: NotchGeometry.preferredScreen())
+        geometry = NotchGeometry(screen: NotchGeometry.preferredScreen(for: displayPreference))
     }
 
     // MARK: - Global Shortcuts (Cmd+Shift+Space & Cmd+Shift+V)

@@ -16,24 +16,32 @@ Built with native Swift, SwiftUI, and AppKit for macOS 14.0+ (Sonoma).
 
 ## What is Floqy?
 
-**Floqy** transforms the hardware notch on MacBook Pro and MacBook Air into a spring-animated productivity hub. It stays tucked into the notch bezel until you hover, press `⌘⇧Space`, or drop a file—expanding smoothly into six symmetrical workspace modules.
+**Floqy** transforms the hardware notch on MacBook Pro and MacBook Air into a spring-animated productivity hub. It stays tucked into the camera bezel until you hover, press `⌘⇧Space`, or drop a file—expanding smoothly into six symmetrical workspace modules with customizable idle companions, themes, and hardware status cards.
 
 ## Module Matrix
 
 | Wing | Tab | Core Capabilities |
 | :--- | :--- | :--- |
-| Left | **Home** | Spotify & Apple Music playback controls, Google Calendar upcoming meeting + 1-click Join, mini Pomodoro |
-| Left | **Files** | Smart Drag-and-Drop Tray, native AirDrop, image/PDF compression & WebP conversion, offline OCR |
-| Left | **Notes & Todo** | Obsidian Quick Note capture (append to Vault Markdown) + persistent Todo list & Focus Timer |
-| Right | **Copy** | Searchable clipboard history (`⌘⇧V`) with auto-type badges, pinning, and AI handoff |
-| Right | **AI** | Official Antigravity, Gemini CLI & Claude Code completion hooks (`floqy://`), Claude Desktop launch, & local stats |
+| Left | **Home** | Spotify & Apple Music playback controls, Google/iCloud/Exchange Calendar + 1-click Join, Pomodoro & Todo overview |
+| Left | **Shelf** | Smart Drag-and-Drop Tray, native AirDrop, image/PDF compression & WebP conversion, offline Vision OCR |
+| Left | **Focus** | Interactive click-or-drag Pomodoro Focus Timer, 4-round session counter, persistent Todo list & local/Obsidian Markdown Notes |
+| Right | **Clipboard** | Searchable clipboard history (`⌘⇧V`) with auto-type badges, pinning, clear unpinned, and instant paste |
+| Right | **AI** | Antigravity, Gemini CLI, Claude Code & Claude Desktop hook status (`floqy://`), live activity equalizer, & quick launch |
 | Right | **System** | Kernel-level Memory Pressure monitor, top RAM consumers, 1-click Quit/Purge, & local dev ports |
+| Right | **Settings (`⚙`)** | Inline theme/wallpaper selector, idle companion (`Off`, `Eyes`, `Cat`, `Dog`, `Wave`, `Horizon`), hardware card toggles |
+
+## Key Features
+
+- **Hardware Status Cards** — Battery-aware Headphones connected & Charging ETA alert cards.
+- **Idle Notch Companions** — Choose `Off`, contextual `Eyes`, `Wave` hairline, ambient `Horizon` pill, or right-wing 1-row `Cat` / `Dog`.
+- **Expanded Themes & Custom Wallpaper** — Keeps the closed notch seamless Obsidian black, then opens in `Obsidian`, `Midnight`, `Pure White`, `Sakura Blush`, `Rose Velvet`, or a custom notch wallpaper image (`Dark` / `Light`).
+- **Multi-Monitor & Launch at Login** — Select `Built-in Notch Display`, `Primary Display`, or `Follow Cursor`, and toggle `Start Floqy at login` via macOS `SMAppService`.
 
 ## Notch States
 
-- **Idle** — Flush with the hardware notch (`196 × 32 pt`) or tucked cleanly at the top edge on external displays.
-- **Compact Live Activity** — Symmetrical wings around the camera (`360–388 × 34 pt`) for Music, Pomodoro timer, meeting reminders, AI status, or RAM alerts.
-- **Expanded Hub** — Full interactive workspace (`560 × 228 pt` below camera clearance) with concave top ears and spring physics.
+- **Idle** — Flush inside the hardware camera (`Off`), a `92pt` tapered mini-chin (`Eyes` / `Wave` / `Horizon`), or a single-row right wing (`Cat` / `Dog`).
+- **Compact Live Activity** — Symmetrical Obsidian wings around the camera for Music, Focus timer, meeting alerts, AI activity, or RAM pressure.
+- **Expanded Hub** — Clean zero-shadow workspace (`596pt` wide) with concave top ears and spring shell morphing.
 
 ## Permissions
 
@@ -41,15 +49,14 @@ Built with native Swift, SwiftUI, and AppKit for macOS 14.0+ (Sonoma).
 | :--- | :--- | :--- |
 | **Automation (AppleEvents)** | Controlling Spotify & Apple Music playback | Optional (Home tab) |
 | **Calendars (EventKit)** | Reading upcoming macOS / Google Calendar events | Optional (Home tab) |
-| **Folder Access (Security-Scoped)** | Appending notes to your Obsidian Vault | Optional (Notes tab) |
-| **Keychain** | Securely storing BYOK AI API keys | Optional (AI tab) |
+| **Folder Access (Security-Scoped)** | Saving notes to an Obsidian Vault or custom folder | Optional (Focus tab) |
 
 ## Requirements
 
 - macOS 14.0 (Sonoma) or newer
 - Swift 5.10+ / Xcode Command Line Tools (`xcode-select --install`)
 
-## Build from Source
+## Build & Package
 
 ```bash
 git clone https://github.com/budimansusanto777/floqy.git
@@ -58,21 +65,21 @@ cd floqy
 open build/Floqy.app
 ```
 
-For a release build:
+Build an optimized release bundle and distributable `.dmg`:
 
 ```bash
-./scripts/build-app.sh release
-open build/Floqy.app
+./scripts/build-dmg.sh
+open build/Floqy-1.0.0.dmg
 ```
 
 ## Roadmap
 
 - [x] **Phase 0** — Repository setup, Core Notch Engine (`NSScreen` geometry, `NSPanel`, concave ears, spring states), global shortcut (`⌘⇧Space`), menu bar & Settings shell
 - [x] **Phase 1** — Daily Flow Core (`Home`: Spotify/Apple Music, EventKit Calendar, Pomodoro & Todo)
-- [x] **Phase 2** — Productivity Power Tools (`Files` Smart Tray, `Notes → Obsidian`, `Copy` Clipboard Manager)
+- [x] **Phase 2** — Productivity Power Tools (`Shelf` Smart Tray, `Focus` Notes/Obsidian, `Clipboard` Manager)
 - [x] **Phase 3** — Unified `System` Tab (Memory Monitor + Local Dev Ports)
 - [x] **Phase 4** — AI Agent Notifications & Hooks (Antigravity, Gemini CLI, Claude Code + Claude Desktop quick launch)
-- [ ] **Phase 5** — Polish, Launch at Login, multi-monitor & `.dmg` distribution
+- [x] **Phase 5** — Custom App Icon (`.icns`), Launch at Login (`SMAppService`), Multi-Monitor Display selection, `.dmg` distribution, & UI polish
 
 ## License
 

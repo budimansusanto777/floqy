@@ -223,3 +223,20 @@ enum NotchThemePreset: String, CaseIterable, Identifiable, Hashable {
         mode.isExpanded ? selected : .obsidian
     }
 }
+
+/// Strategy for selecting which macOS display hosts the Floqy notch panel.
+enum DisplayPreference: String, CaseIterable, Identifiable, Hashable {
+    case builtInNotch
+    case primary
+    case followCursor
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .builtInNotch: return "Built-in Notch Display"
+        case .primary: return "Primary Display"
+        case .followCursor: return "Follow Cursor"
+        }
+    }
+}
