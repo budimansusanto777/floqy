@@ -5,6 +5,8 @@ enum NotchAlert: Equatable, Hashable {
     case pomodoroComplete(durationMinutes: Int)
     case meetingStarting(eventId: String, title: String, provider: String, url: URL)
     case aiFinished(agent: AIAgentKind)
+    case headphonesConnected(name: String, batteryPercent: Int?, isAirPods: Bool)
+    case chargingConnected(batteryPercent: Int, etaText: String?)
 }
 
 /// Represents the four visual states of the Floqy notch window.
@@ -102,9 +104,9 @@ enum NotchTab: String, CaseIterable, Identifiable, Hashable {
     var title: String {
         switch self {
         case .home: return "Home"
-        case .files: return "Files"
-        case .notes: return "Notes & Todo"
-        case .clipboard: return "Copy"
+        case .files: return "Shelf"
+        case .notes: return "Focus"
+        case .clipboard: return "Clipboard"
         case .ai: return "AI"
         case .system: return "System"
         }
@@ -131,6 +133,56 @@ enum HomeSubView: String, CaseIterable, Equatable, Hashable {
         switch self {
         case .overview: return "Overview"
         case .calendar: return "Calendar"
+        }
+    }
+}
+
+/// Selectable visual appearance for the idle notch mini-chin.
+enum IdleAppearance: String, CaseIterable, Identifiable, Hashable {
+    case off
+    case eyes
+    case cat
+    case dog
+    case wave
+    case horizon
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .off: return "Off"
+        case .eyes: return "Eyes"
+        case .cat: return "Cat"
+        case .dog: return "Dog"
+        case .wave: return "Wave"
+        case .horizon: return "Horizon"
+        }
+    }
+
+    var isVisible: Bool {
+        self != .off
+    }
+
+    var isSideWing: Bool {
+        self == .cat || self == .dog
+    }
+
+    var usesBottomChin: Bool {
+        isVisible && !isSideWing
+    }
+}
+
+/// Horizontal footprint of the idle mini-chin beneath the hardware camera.
+enum IdleNotchWidth: String, CaseIterable, Identifiable, Hashable {
+    case compact
+    case full
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .compact: return "Compact"
+        case .full: return "Full"
         }
     }
 }

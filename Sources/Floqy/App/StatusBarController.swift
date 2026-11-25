@@ -13,6 +13,9 @@ final class StatusBarController: NSObject {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
         configureStatusItem()
+        notchManager.onOpenFullSettings = { [weak self] in
+            self?.openSettings()
+        }
     }
 
     private func configureStatusItem() {

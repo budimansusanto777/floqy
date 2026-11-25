@@ -27,7 +27,18 @@ struct NotchCompactView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
         .onTapGesture {
-            manager.setMode(.expanded)
+            switch activity {
+            case .music:
+                manager.selectTab(.home)
+            case .pomodoro:
+                manager.selectTab(.notes)
+            case .ai:
+                manager.selectTab(.ai)
+            case .memory:
+                manager.selectTab(.system)
+            case .meeting:
+                manager.selectTab(.home)
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Compact \(activity.displayName) activity. Tap to expand.")
@@ -68,11 +79,11 @@ struct NotchCompactView: View {
                     .lineLimit(1)
             }
         case .pomodoro:
-            let ringColor = productivity.pomodoro.isRunning ? NotchColors.statusAlert : NotchColors.textSecondary
+            let ringColor = productivity.pomodoro.isRunning ? NotchColors.focusAccent : NotchColors.textSecondary
             HStack(spacing: 6) {
                 ZStack {
                     Circle()
-                        .stroke(Color.white.opacity(0.14), lineWidth: 2)
+                        .stroke(Color.white.opacity(0.16), lineWidth: 2)
                     Circle()
                         .trim(from: 0, to: productivity.pomodoro.remainingProgress)
                         .stroke(ringColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
@@ -93,8 +104,8 @@ struct NotchCompactView: View {
             }
         case .ai:
             HStack(spacing: 6) {
-                Image(systemName: "command")
-                    .font(.system(size: 10.5, weight: .semibold))
+                Image(systemName: "triangle")
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(NotchColors.accentPrimary)
                 Text(ai.workingAgent?.shortName ?? "Floqy AI")
                     .font(.system(size: 11, weight: .medium))
@@ -191,12 +202,18 @@ struct NotchCompactView: View {
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .monospacedDigit()
                 .foregroundStyle(
-                    productivity.pomodoro.isRunning ? NotchColors.statusAlert : NotchColors.textSecondary
+                    productivity.pomodoro.isRunning ? NotchColors.focusAccent : NotchColors.textSecondary
                 )
         case .ai:
-            Text(ai.workingAgent != nil ? "Working" : "Ready")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(ai.workingAgent != nil ? NotchColors.accentPrimary : NotchColors.statusHealthy)
+            HStack(spacing: 5) {
+                Text(ai.workingAgent != nil ? "Working" : "Ready")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(ai.workingAgent != nil ? NotchColors.accentPrimary : NotchColors.statusHealthy)
+                if ai.workingAgent != nil {
+                    EqualizerBarsView(isPlaying: true, barCount: 3)
+                        .frame(height: 11)
+                }
+            }
         case .memory:
             let memColor = system.snapshot.pressureLevel == .critical ? NotchColors.statusAlert : NotchColors.statusWarning
             Text("\(system.snapshot.usedPercent)%")
@@ -206,7 +223,7 @@ struct NotchCompactView: View {
     }
 }
 
-/// Actionable notification pill displayed cleanly below the hardware camera cutout.
+/// Hardware Card notification pills displayed cleanly below the hardware camera cutout.
 struct NotchAlertView: View {
     @ObservedObject var manager: NotchManager
     let alert: NotchAlert
@@ -218,20 +235,29 @@ struct NotchAlertView: View {
             Color.clear
                 .frame(height: max(22, manager.geometry.notchSafeTopHeight - 2))
 
-            HStack(spacing: 10) {
-                alertBadge
-                alertLabels
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                alertActions
+            Group {
+                if case .chargingConnected(let batteryPercent, let etaText) = alert {
+                    chargingTelemetryCard(batteryPercent: batteryPercent, etaText: etaText)
+                } else {
+                    HStack(spacing: 10) {
+                        alertBadge
+                        alertLabels
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        alertActions
+                    }
+                }
             }
             .padding(.horizontal, 14)
-            .padding(.bottom, 10)
+            .padding(.bottom, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .contentShape(Rectangle())
             .onTapGesture {
-                if case .aiFinished(let agent) = alert {
+                switch alert {
+                case .aiFinished(let agent):
                     manager.openAgentFromAlert(agent)
-                } else {
+                case .headphonesConnected, .chargingConnected:
+                    manager.dismissActiveAlert()
+                case .pomodoroComplete, .meetingStarting:
                     manager.setMode(.expanded)
                 }
             }
@@ -243,11 +269,56 @@ struct NotchAlertView: View {
         }
     }
 
+    private func chargingTelemetryCard(batteryPercent: Int, etaText: String?) -> some View {
+        let clampedFraction = CGFloat(min(100, max(0, batteryPercent))) / 100.0
+        return VStack(spacing: 7) {
+            HStack(spacing: 6) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(NotchColors.statusHealthy)
+                Text("Charging")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(NotchColors.textPrimary)
+                if let etaText {
+                    Text("· \(etaText)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(NotchColors.textSecondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                Text("\(batteryPercent)%")
+                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundStyle(NotchColors.statusHealthy)
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.white.opacity(0.14))
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(NotchColors.statusHealthy)
+                        .frame(width: max(6, geo.size.width * clampedFraction))
+                    HStack(spacing: 0) {
+                        ForEach(0..<3, id: \.self) { _ in
+                            Spacer()
+                            Rectangle()
+                                .fill(Color.black.opacity(0.6))
+                                .frame(width: 1)
+                        }
+                        Spacer()
+                    }
+                }
+            }
+            .frame(height: 7)
+        }
+    }
+
     private func accentColor(for agent: AIAgentKind) -> Color {
         switch agent {
         case .antigravity: return NotchColors.accentPrimary
         case .geminiCLI: return NotchColors.statusHealthy
-        case .claudeCode, .claudeDesktop: return NotchColors.statusWarning
+        case .claudeCode, .claudeDesktop: return NotchColors.focusAccent
         }
     }
 
@@ -255,16 +326,16 @@ struct NotchAlertView: View {
     private var alertBadge: some View {
         switch alert {
         case .pomodoroComplete:
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 16, weight: .semibold))
+            Image(systemName: "checkmark")
+                .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(NotchColors.statusHealthy)
                 .symbolEffect(.bounce, value: iconPopped)
-                .frame(width: 28, height: 28)
+                .frame(width: 32, height: 32)
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: 9)
                         .fill(NotchColors.statusHealthy.opacity(0.16))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8)
+                            RoundedRectangle(cornerRadius: 9)
                                 .stroke(NotchColors.statusHealthy.opacity(0.35), lineWidth: 1)
                         )
                 )
@@ -273,30 +344,45 @@ struct NotchAlertView: View {
             Image(systemName: "video.fill")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(accent)
-                .frame(width: 28, height: 28)
+                .frame(width: 32, height: 32)
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: 9)
                         .fill(accent.opacity(0.16))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8)
+                            RoundedRectangle(cornerRadius: 9)
                                 .stroke(accent.opacity(0.35), lineWidth: 1)
                         )
                 )
         case .aiFinished(let agent):
             let accent = accentColor(for: agent)
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 15, weight: .semibold))
+            Image(systemName: "triangle")
+                .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(accent)
                 .symbolEffect(.bounce, value: iconPopped)
-                .frame(width: 28, height: 28)
+                .frame(width: 32, height: 32)
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: 9)
                         .fill(accent.opacity(0.16))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8)
+                            RoundedRectangle(cornerRadius: 9)
                                 .stroke(accent.opacity(0.35), lineWidth: 1)
                         )
                 )
+        case .headphonesConnected(_, _, let isAirPods):
+            Image(systemName: isAirPods ? "airpodspro" : "headphones")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(NotchColors.textPrimary)
+                .frame(width: 36, height: 36)
+                .background(
+                    Circle()
+                        .fill(Color(red: 0.09, green: 0.10, blue: 0.12))
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.11), lineWidth: 1)
+                        )
+                )
+        case .chargingConnected:
+            EmptyView()
         }
     }
 
@@ -304,18 +390,18 @@ struct NotchAlertView: View {
     private var alertLabels: some View {
         switch alert {
         case .pomodoroComplete(let durationMinutes):
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text("Focus Session Complete")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(NotchColors.textPrimary)
                     .lineLimit(1)
-                Text("\(durationMinutes)m focus finished")
+                Text("\(durationMinutes)m focus finished · Session \(manager.productivity.lastCompletedRoundNumber) of 4")
                     .font(.system(size: 10.5))
                     .foregroundStyle(NotchColors.textSecondary)
                     .lineLimit(1)
             }
         case .meetingStarting(_, let title, let provider, _):
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(NotchColors.textPrimary)
@@ -326,7 +412,7 @@ struct NotchAlertView: View {
                     .lineLimit(1)
             }
         case .aiFinished(let agent):
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text("\(agent.displayName) finished")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(NotchColors.textPrimary)
@@ -336,6 +422,19 @@ struct NotchAlertView: View {
                     .foregroundStyle(NotchColors.textSecondary)
                     .lineLimit(1)
             }
+        case .headphonesConnected(let name, _, _):
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(NotchColors.textPrimary)
+                    .lineLimit(1)
+                Text("Connected · Audio Output")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(NotchColors.textSecondary)
+                    .lineLimit(1)
+            }
+        case .chargingConnected:
+            EmptyView()
         }
     }
 
@@ -387,14 +486,46 @@ struct NotchAlertView: View {
                 .accessibilityLabel("Dismiss meeting notification")
             }
         case .aiFinished:
+            Text("now")
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(NotchColors.textSecondary)
+        case .headphonesConnected(_, let batteryPercent, _):
+            if let batteryPercent {
+                let fraction = CGFloat(min(100, max(0, batteryPercent))) / 100.0
+                HStack(spacing: 7) {
+                    Text("\(batteryPercent)%")
+                        .font(.system(size: 13.5, weight: .semibold, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(NotchColors.statusHealthy)
+
+                    ZStack {
+                        Circle()
+                            .stroke(Color.white.opacity(0.14), lineWidth: 2.5)
+                        Circle()
+                            .trim(from: 0, to: fraction)
+                            .stroke(NotchColors.statusHealthy, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                    }
+                    .frame(width: 24, height: 24)
+                }
+            } else {
+                Text("Connected")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(NotchColors.statusHealthy)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(NotchColors.statusHealthy.opacity(0.14)))
+            }
+        case .chargingConnected:
             EmptyView()
         }
     }
 }
 
-/// 4-bar audio equalizer that animates only during active playback and respects Reduce Motion.
+/// Multi-bar kinetic indicator that respects Reduce Motion.
 struct EqualizerBarsView: View {
     let isPlaying: Bool
+    var barCount: Int = 4
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulse = false
 
@@ -404,7 +535,7 @@ struct EqualizerBarsView: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 2) {
-            ForEach(0..<4, id: \.self) { index in
+            ForEach(0..<max(1, min(4, barCount)), id: \.self) { index in
                 Capsule()
                     .fill(NotchColors.accentPrimary)
                     .frame(width: 2.5, height: barHeight(at: index))

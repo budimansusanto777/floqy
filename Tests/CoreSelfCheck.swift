@@ -16,7 +16,8 @@ enum CoreSelfCheck {
         checkNotchEnhancementsLogic()
         checkSystemLogic()
         checkAIActivityLogic()
-        print("CoreSelfCheck: 12/12 checks passed.")
+        checkHardwareStatusAndRestingEyesLogic()
+        print("CoreSelfCheck: 13/13 checks passed.")
     }
 
     private static func checkNotchedScreenDetection() {
@@ -78,7 +79,7 @@ enum CoreSelfCheck {
 
         let expandedOverview = geometry.panelFrame(for: .expanded, homeSubView: .overview, activeTab: .home)
         precondition(expandedOverview == geometry.panelCanvasFrame(), "Expanded overview frame must equal panelCanvasFrame")
-        precondition(expandedOverview.width == 560 + NotchGeometry.horizontalPadding, "Expanded panel width mismatch")
+        precondition(expandedOverview.width == 596 + NotchGeometry.horizontalPadding, "Expanded panel width mismatch")
 
         let expandedCalendar = geometry.panelFrame(for: .expanded, homeSubView: .calendar, activeTab: .home)
         precondition(expandedCalendar.height > expandedOverview.height, "Calendar mode height must exceed Overview height")
@@ -152,6 +153,22 @@ enum CoreSelfCheck {
             CalendarLogic.formatCountdown(from: now, to: now.addingTimeInterval(-60), end: now.addingTimeInterval(600)) == "Now",
             "Active meeting should show Now"
         )
+
+        var freshPomodoro = PomodoroState(durationMinutes: 1)
+        precondition(freshPomodoro.isAtInitialStart, "Fresh stopped Pomodoro should be at initial start")
+        freshPomodoro.isRunning = true
+        precondition(!freshPomodoro.isAtInitialStart, "Running Pomodoro should not report initial start")
+        _ = freshPomodoro.tick()
+        freshPomodoro.isRunning = false
+        precondition(!freshPomodoro.isAtInitialStart, "Paused Pomodoro mid-countdown should not report initial start")
+        freshPomodoro.remainingSeconds = 0
+        precondition(!freshPomodoro.isAtInitialStart, "Completed Pomodoro should not report initial start")
+
+        precondition(PomodoroState.currentRound(completedSessions: 0) == 1, "Initial round must be 1")
+        precondition(PomodoroState.lastCompletedRound(completedSessions: 1) == 1, "First completed alert must say Session 1")
+        precondition(PomodoroState.currentRound(completedSessions: 1) == 2, "Next round after 1 completion must be 2")
+        precondition(PomodoroState.lastCompletedRound(completedSessions: 4) == 4, "Fourth completed alert must say Session 4")
+        precondition(PomodoroState.lastCompletedRound(completedSessions: 5) == 1, "Fifth completed alert wraps to Session 1")
         precondition(
             CalendarLogic.formatCountdown(from: now, to: now.addingTimeInterval(12 * 60), end: now.addingTimeInterval(42 * 60)) == "In 12 min",
             "12-minute countdown mismatch"
@@ -251,11 +268,15 @@ enum CoreSelfCheck {
         let alertSize = geometry.shellSize(for: .alert(alert))
         let alertFrame = geometry.panelFrame(for: .alert(alert))
         let alertHit = geometry.hitRectInPanel(for: .alert(alert))
+        let centeredIdle = geometry.centeredFrame(size: CGSize(width: 196, height: 54))
+        let centeredExpanded = geometry.centeredFrame(size: CGSize(width: 620, height: 268))
+        precondition(abs(centeredIdle.midX - round(geometry.screenFrame.midX)) <= 0.5 && centeredIdle.maxY == geometry.screenFrame.maxY, "Idle centeredFrame must anchor top-center")
+        precondition(abs(centeredExpanded.midX - round(geometry.screenFrame.midX)) <= 0.5 && centeredExpanded.maxY == geometry.screenFrame.maxY, "Expanded centeredFrame must anchor top-center")
         precondition(alertSize.height > compactSize.height, "Alert shell must expand vertically beyond compact height")
         precondition(CGRect(origin: .zero, size: alertFrame.size).contains(alertHit), "Alert hit rect must fit inside alert panel")
 
         var shape = NotchShellShape(topEarRadius: 12, bottomCornerRadius: 22)
-        shape.animatableData = .init(6, 18)
+        shape.animatableData = .init(.init(6, 18), .init(0, 0))
         precondition(shape.topEarRadius == 6 && shape.bottomCornerRadius == 18, "NotchShellShape AnimatablePair mismatch")
         let clampedPath = NotchShellShape(topEarRadius: -2, bottomCornerRadius: -4).path(in: CGRect(x: 0, y: 0, width: 200, height: 38))
         precondition(!clampedPath.isEmpty, "NotchShellShape must clamp negative radii safely")
@@ -469,6 +490,75 @@ enum CoreSelfCheck {
             isMusicPlaying: true
         )
         precondition(resolvedAI == .compact(.ai), "Active AI work must precede Memory & Music")
+    }
+
+    private static func checkHardwareStatusAndRestingEyesLogic() {
+        let unplugged = BatteryStatus(percentage: 64, isCharging: false, isPluggedIn: false, timeToFullMinutes: nil)
+        let plugged = BatteryStatus(percentage: 64, isCharging: true, isPluggedIn: true, timeToFullMinutes: 42)
+        precondition(plugged.formattedETA == "42m to full", "Battery ETA minute formatting mismatch")
+        precondition(BatteryStatus(percentage: 50, isCharging: true, isPluggedIn: true, timeToFullMinutes: 75).formattedETA == "1h 15m to full", "Battery ETA hour formatting mismatch")
+        precondition(BatteryStatus(percentage: 100, isCharging: false, isPluggedIn: true, timeToFullMinutes: 0).formattedETA == nil, "Zero ETA should be nil")
+
+        precondition(!HardwareStatusLogic.shouldTriggerChargingCard(previous: nil, current: plugged), "Initial baseline must not trigger charging card")
+        precondition(HardwareStatusLogic.shouldTriggerChargingCard(previous: unplugged, current: plugged), "Unplugged -> plugged must trigger charging card")
+        precondition(!HardwareStatusLogic.shouldTriggerChargingCard(previous: plugged, current: plugged), "Already charging must not retrigger")
+
+        precondition(HardwareStatusLogic.isAirPodsName("Budiman's AirPods Pro"), "AirPods detection mismatch")
+        precondition(HardwareStatusLogic.isLikelyHeadphoneDevice(name: "WH-1000XM5", isBluetooth: true, isWiredHeadphonePort: false), "Bluetooth headset should be accepted")
+        precondition(!HardwareStatusLogic.isLikelyHeadphoneDevice(name: "MacBook Pro Speakers", isBluetooth: false, isWiredHeadphonePort: false), "Built-in speakers must be excluded")
+        precondition(HardwareStatusLogic.isLikelyHeadphoneDevice(name: "External Headphones", isBluetooth: false, isWiredHeadphonePort: true), "Wired headphone jack must be accepted")
+
+        let airpods = HeadphoneStatus(name: "AirPods Pro", batteryPercent: 82, isAirPods: true)
+        precondition(!HardwareStatusLogic.shouldTriggerHeadphoneCard(previousDeviceName: nil, current: airpods), "Initial audio baseline must not trigger card")
+        precondition(HardwareStatusLogic.shouldTriggerHeadphoneCard(previousDeviceName: "MacBook Pro Speakers", current: airpods), "Switching to headphones must trigger card")
+        precondition(!HardwareStatusLogic.shouldTriggerHeadphoneCard(previousDeviceName: "AirPods Pro", current: airpods), "Same device must not retrigger")
+
+        let geometry = NotchGeometry(
+            screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+            auxiliaryTopLeftArea: CGRect(x: 0, y: 944, width: 656, height: 38),
+            auxiliaryTopRightArea: CGRect(x: 856, y: 944, width: 656, height: 38)
+        )
+        precondition(IdleAppearance.allCases.count == 6, "IdleAppearance must expose Off, Eyes, Cat, Dog, Wave, and Horizon")
+        precondition(!IdleAppearance.off.isVisible && IdleAppearance.cat.isVisible && IdleAppearance.horizon.isVisible, "Only Off hides the idle mini-chin")
+        precondition(IdleAppearance.cat.isSideWing && IdleAppearance.dog.isSideWing && !IdleAppearance.eyes.isSideWing, "Cat and Dog use single-row side wings")
+        precondition(!IdleAppearance.cat.usesBottomChin && IdleAppearance.eyes.usesBottomChin, "Only non-wing visible idle styles use bottom chin")
+        precondition(IdleNotchWidth.allCases.count == 2, "IdleNotchWidth must expose Compact and Full")
+
+        let eyesIdle = geometry.shellSize(for: .idle, idleAppearance: .eyes)
+        precondition(eyesIdle.height == geometry.notchSafeTopHeight + 20, "Bottom-chin idle must extend 20pt below hardware camera")
+        precondition(geometry.earPadding(for: .idle, idleAppearance: .eyes, idleWidth: .compact) == 0, "Compact idle mini-chin sits flush with camera top without side ears")
+        precondition(geometry.earPadding(for: .idle, idleAppearance: .eyes, idleWidth: .full) == NotchGeometry.horizontalPadding, "Full idle width includes concave side ears")
+        precondition(geometry.earPadding(for: .idle, idleAppearance: .off, idleWidth: .full) == 0, "Flush Off idle must have zero ear padding")
+        precondition(geometry.bottomRadius(for: .idle, idleAppearance: .eyes, idleWidth: .compact) == 12, "Compact idle chin must use 12pt bottom radius")
+        precondition(geometry.bottomRadius(for: .idle, idleAppearance: .eyes, idleWidth: .full) == 16, "Full idle width must use 16pt bottom radius")
+        precondition(geometry.taperedChinInset(for: .idle, idleAppearance: .eyes, idleWidth: .compact) > 40, "Compact tapered idle chin must inset cleanly from hardware camera edges")
+        precondition(geometry.taperedChinInset(for: .idle, idleAppearance: .eyes, idleWidth: .full) == 0, "Full idle width has zero tapered inset")
+        precondition(geometry.taperedChinInset(for: .expanded, idleAppearance: .eyes) == 0, "Expanded shell never uses tapered chin inset")
+
+        let catSize = geometry.shellSize(for: .idle, idleAppearance: .cat)
+        let catHit = geometry.hitRectInPanel(for: .idle, idleAppearance: .cat)
+        precondition(catSize.height == geometry.hardwareNotchSize.height, "Side-wing Cat must match camera height on a single row")
+        precondition(geometry.leftLeadingInset(for: .idle, idleAppearance: .cat) == NotchGeometry.sideWingSlotWidth, "Right-wing Cat must leave leading inset for left menu bar")
+        precondition(catHit.minX >= NotchGeometry.sideWingSlotWidth - 0.5, "Side-wing hit rect must not cover left transparent menu-bar slot")
+
+        let rightWingShape = NotchShellShape(
+            topEarRadius: NotchGeometry.earWidth,
+            bottomCornerRadius: geometry.bottomRadius(for: .idle, idleAppearance: .dog),
+            leftLeadingInset: NotchGeometry.sideWingSlotWidth
+        )
+        let rightWingPath = rightWingShape.path(in: CGRect(origin: .zero, size: catSize))
+        precondition(!rightWingPath.isEmpty && rightWingPath.boundingRect.minX >= NotchGeometry.sideWingSlotWidth - 0.5, "Right-wing shape must stay flush right of left inset")
+
+        var taperedShape = NotchShellShape(
+            topEarRadius: 0,
+            bottomCornerRadius: geometry.bottomRadius(for: .idle, idleAppearance: .eyes),
+            taperedChinInset: geometry.taperedChinInset(for: .idle, idleAppearance: .eyes),
+            cameraHeight: geometry.notchSafeTopHeight
+        )
+        taperedShape.animatableData = .init(.init(4, 13), .init(36, 0))
+        precondition(taperedShape.taperedChinInset == 36, "NotchShellShape animatableData must drive taperedChinInset")
+        let taperedPath = taperedShape.path(in: CGRect(origin: .zero, size: eyesIdle))
+        precondition(!taperedPath.isEmpty, "Tapered mini-chin shape must produce a valid path")
     }
 }
 

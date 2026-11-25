@@ -1,72 +1,91 @@
 import SwiftUI
 
-/// Root SwiftUI container hosted inside NotchPanel, rendering the hardware-matched shell and state views.
+/// Root SwiftUI container hosted inside NotchPanel, rendering the flat hardware-matched shell and state views.
 struct NotchRootView: View {
     @ObservedObject var manager: NotchManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pulseActive = false
+
+    private var effectiveHomeSubView: HomeSubView {
+        manager.isShowingInlineSettings ? .overview : manager.homeSubView
+    }
 
     private var shellSize: CGSize {
         manager.geometry.shellSize(
             for: manager.mode,
-            homeSubView: manager.homeSubView,
-            activeTab: manager.activeTab
+            homeSubView: effectiveHomeSubView,
+            activeTab: manager.activeTab,
+            idleAppearance: manager.idleAppearance
         )
     }
 
     private var idleSize: CGSize {
-        manager.geometry.shellSize(for: .idle)
-    }
-
-    private var alertSize: CGSize {
-        manager.geometry.shellSize(for: .alert(.pomodoroComplete(durationMinutes: 25)))
+        manager.geometry.shellSize(
+            for: .idle,
+            idleAppearance: manager.idleAppearance
+        )
     }
 
     private var expandedSize: CGSize {
         manager.geometry.shellSize(
             for: .expanded,
-            homeSubView: manager.homeSubView,
-            activeTab: manager.activeTab
+            homeSubView: effectiveHomeSubView,
+            activeTab: manager.activeTab,
+            idleAppearance: manager.idleAppearance
         )
     }
 
     private var earRadius: CGFloat {
-        manager.mode == .idle ? 0 : NotchGeometry.earWidth
+        if case .idle = manager.mode {
+            let needsEars = manager.idleAppearance.isSideWing
+                || (manager.idleAppearance.usesBottomChin && manager.idleWidth == .full)
+            return needsEars ? NotchGeometry.earWidth : 0
+        }
+        return NotchGeometry.earWidth
+    }
+
+    private var taperedChinInset: CGFloat {
+        manager.geometry.taperedChinInset(
+            for: manager.mode,
+            idleAppearance: manager.idleAppearance,
+            idleWidth: manager.idleWidth
+        )
+    }
+
+    private var leftLeadingInset: CGFloat {
+        manager.geometry.leftLeadingInset(
+            for: manager.mode,
+            idleAppearance: manager.idleAppearance
+        )
+    }
+
+    private var cameraHeight: CGFloat {
+        manager.geometry.notchSafeTopHeight
     }
 
     private var totalWidth: CGFloat {
-        shellSize.width + manager.geometry.earPadding(for: manager.mode)
+        shellSize.width + manager.geometry.earPadding(
+            for: manager.mode,
+            idleAppearance: manager.idleAppearance,
+            idleWidth: manager.idleWidth
+        )
     }
 
     private var bottomRadius: CGFloat {
-        manager.geometry.bottomRadius(for: manager.mode)
+        manager.geometry.bottomRadius(
+            for: manager.mode,
+            idleAppearance: manager.idleAppearance,
+            idleWidth: manager.idleWidth
+        )
     }
 
-    private var isPomodoroCompleteAlert: Bool {
-        if case .alert(.pomodoroComplete) = manager.mode { return true }
-        return false
-    }
-
-    private var borderStrokeColor: Color {
-        if manager.isDragTargeted {
-            return NotchColors.accentPrimary
-        }
-        if isPomodoroCompleteAlert {
-            return NotchColors.statusHealthy.opacity(pulseActive ? 0.95 : 0.45)
-        }
-        if case .alert(.meetingStarting(_, _, let provider, _)) = manager.mode {
-            let accent = provider == "Google Meet" ? NotchColors.statusHealthy : NotchColors.accentPrimary
-            return accent.opacity(0.45)
-        }
-        if case .alert(.aiFinished(let agent)) = manager.mode {
-            let accent: Color = switch agent {
-            case .antigravity: NotchColors.accentPrimary
-            case .geminiCLI: NotchColors.statusHealthy
-            case .claudeCode, .claudeDesktop: NotchColors.statusWarning
-            }
-            return accent.opacity(0.55)
-        }
-        return Color.white.opacity(manager.mode == .idle ? 0.0 : 0.14)
+    private var shellShape: NotchShellShape {
+        NotchShellShape(
+            topEarRadius: earRadius,
+            bottomCornerRadius: bottomRadius,
+            taperedChinInset: taperedChinInset,
+            leftLeadingInset: leftLeadingInset,
+            cameraHeight: cameraHeight
+        )
     }
 
     private var contentTransition: AnyTransition {
@@ -80,40 +99,20 @@ struct NotchRootView: View {
     }
 
     var body: some View {
-        NotchShellShape(
-            topEarRadius: earRadius,
-            bottomCornerRadius: bottomRadius
-        )
-        .fill(NotchColors.notchBackground)
-        .overlay(
-            Group {
-                if isPomodoroCompleteAlert {
-                    NotchShellShape(
-                        topEarRadius: earRadius,
-                        bottomCornerRadius: bottomRadius
-                    )
-                    .stroke(
-                        NotchColors.statusHealthy.opacity(pulseActive ? 0.55 : 0.2),
-                        lineWidth: 6
-                    )
-                    .blur(radius: 4)
-                }
-            }
-            .clipShape(
-                NotchShellShape(
-                    topEarRadius: earRadius,
-                    bottomCornerRadius: bottomRadius
-                )
-            )
-        )
+        shellShape
+            .fill(NotchColors.notchBackground)
         .overlay(alignment: .top) {
             // Keep each mode view at its natural fixed frame so collapsing never crushes child layouts.
             Group {
                 switch manager.mode {
                 case .idle:
-                    NotchIdleView(manager: manager)
-                        .frame(width: idleSize.width, height: idleSize.height)
-                        .transition(.opacity)
+                    NotchIdleView(
+                        manager: manager,
+                        productivity: manager.productivity,
+                        hardware: manager.hardware
+                    )
+                    .frame(width: idleSize.width, height: idleSize.height)
+                    .transition(.opacity)
                 case .compact(let activity):
                     let activityCompactSize = manager.geometry.shellSize(for: .compact(activity))
                     NotchCompactView(
@@ -128,6 +127,7 @@ struct NotchRootView: View {
                     .compositingGroup()
                     .transition(contentTransition)
                 case .alert(let alert):
+                    let alertSize = manager.geometry.shellSize(for: .alert(alert))
                     NotchAlertView(manager: manager, alert: alert)
                         .frame(width: alertSize.width, height: alertSize.height)
                         .compositingGroup()
@@ -140,41 +140,16 @@ struct NotchRootView: View {
                 }
             }
         }
-        .clipShape(
-            NotchShellShape(
-                topEarRadius: earRadius,
-                bottomCornerRadius: bottomRadius
-            )
-        )
+        .clipShape(shellShape)
         .overlay(
-            NotchShellShape(
-                topEarRadius: earRadius,
-                bottomCornerRadius: bottomRadius
-            )
-            .stroke(
-                borderStrokeColor,
-                lineWidth: (manager.isDragTargeted || isPomodoroCompleteAlert) ? 1.5 : 1
-            )
+            shellShape
+                .stroke(
+                    manager.isDragTargeted ? NotchColors.accentPrimary : Color.clear,
+                    lineWidth: manager.isDragTargeted ? 1.5 : 0
+                )
         )
         .frame(width: totalWidth, height: shellSize.height, alignment: .top)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onChange(of: isPomodoroCompleteAlert) { _, active in
-            triggerGlowPulseIfNeeded(active)
-        }
-        .onAppear {
-            triggerGlowPulseIfNeeded(isPomodoroCompleteAlert)
-        }
         .preferredColorScheme(.dark)
-    }
-
-    private func triggerGlowPulseIfNeeded(_ active: Bool) {
-        guard active, !reduceMotion else {
-            pulseActive = false
-            return
-        }
-        pulseActive = false
-        withAnimation(.easeInOut(duration: 0.55).repeatCount(5, autoreverses: true)) {
-            pulseActive = true
-        }
     }
 }

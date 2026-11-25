@@ -18,6 +18,19 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("Notch Behavior") {
+                Picker("Idle notch", selection: $manager.idleAppearance) {
+                    ForEach(IdleAppearance.allCases) { appearance in
+                        Text(appearance.title).tag(appearance)
+                    }
+                }
+                Picker("Idle width", selection: $manager.idleWidth) {
+                    ForEach(IdleNotchWidth.allCases) { width in
+                        Text(width.title).tag(width)
+                    }
+                }
+                .disabled(!manager.idleAppearance.usesBottomChin)
+                Toggle("Headphones connected card", isOn: $manager.headphonesCardEnabled)
+                Toggle("Charging status card", isOn: $manager.chargingCardEnabled)
                 Toggle("Auto-expand on hover", isOn: $manager.hoverToExpandEnabled)
                 Toggle("Notification sounds", isOn: $manager.alertSoundsEnabled)
 

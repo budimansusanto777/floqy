@@ -27,7 +27,10 @@ let package = Package(
                 .linkedFramework("Vision"),
                 .linkedFramework("PDFKit"),
                 .linkedFramework("ImageIO"),
-                .linkedFramework("UniformTypeIdentifiers")
+                .linkedFramework("UniformTypeIdentifiers"),
+                .linkedFramework("IOKit"),
+                .linkedFramework("CoreAudio"),
+                .linkedFramework("IOBluetooth")
             ]
         )
     ]

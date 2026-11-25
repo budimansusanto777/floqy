@@ -56,22 +56,47 @@ struct NotchGeometry: Equatable {
         hasHardwareNotch ? hardwareNotchSize.width + 12 : 48
     }
 
-    func earPadding(for mode: NotchMode) -> CGFloat {
-        mode == .idle ? 0 : Self.horizontalPadding
+    static let idleChinWidth: CGFloat = 92
+    static let sideWingWidth: CGFloat = 44
+    static let sideWingSlotWidth: CGFloat = sideWingWidth + earWidth
+
+    func earPadding(
+        for mode: NotchMode,
+        idleAppearance: IdleAppearance = .off,
+        idleWidth: IdleNotchWidth = .compact
+    ) -> CGFloat {
+        if case .idle = mode {
+            return (idleAppearance.usesBottomChin && idleWidth == .full) ? Self.horizontalPadding : 0
+        }
+        return Self.horizontalPadding
     }
 
-    func bottomPadding(for mode: NotchMode) -> CGFloat {
-        mode == .idle ? 0 : 2
+    func bottomPadding(for mode: NotchMode, idleAppearance: IdleAppearance = .off) -> CGFloat {
+        if case .idle = mode {
+            return idleAppearance.usesBottomChin ? 2 : 0
+        }
+        return 2
     }
 
     /// Returns the content shell size (excluding the outer concave ears) for a given notch mode and active sub-view.
     func shellSize(
         for mode: NotchMode,
         homeSubView: HomeSubView = .overview,
-        activeTab: NotchTab = .home
+        activeTab: NotchTab = .home,
+        idleAppearance: IdleAppearance = .off
     ) -> CGSize {
         switch mode {
         case .idle:
+            let baseWidth = hasHardwareNotch ? hardwareNotchSize.width : 196
+            if idleAppearance.isSideWing {
+                return CGSize(
+                    width: baseWidth + Self.sideWingSlotWidth * 2,
+                    height: hasHardwareNotch ? hardwareNotchSize.height : 34
+                )
+            }
+            if idleAppearance.usesBottomChin {
+                return CGSize(width: baseWidth, height: notchSafeTopHeight + 20)
+            }
             return hasHardwareNotch
                 ? hardwareNotchSize
                 : CGSize(width: 196, height: 32)
@@ -84,44 +109,102 @@ struct NotchGeometry: Equatable {
                 width: compactWidth,
                 height: hasHardwareNotch ? hardwareNotchSize.height : 34
             )
-        case .alert:
-            return CGSize(width: 416, height: max(82, notchSafeTopHeight + 50))
+        case .alert(let alert):
+            switch alert {
+            case .headphonesConnected, .chargingConnected:
+                return CGSize(width: 376, height: max(86, notchSafeTopHeight + 52))
+            case .aiFinished:
+                return CGSize(width: 392, height: max(84, notchSafeTopHeight + 50))
+            case .pomodoroComplete, .meetingStarting:
+                return CGSize(width: 424, height: max(86, notchSafeTopHeight + 52))
+            }
         case .expanded:
             if activeTab == .home && homeSubView == .calendar {
-                return CGSize(width: 560, height: max(268, notchSafeTopHeight + 234))
+                return CGSize(width: 596, height: max(268, notchSafeTopHeight + 234))
             }
-            return CGSize(width: 560, height: max(228, notchSafeTopHeight + 194))
+            return CGSize(width: 596, height: max(224, notchSafeTopHeight + 190))
         }
     }
 
     var bottomCornerRadius: CGFloat { 26 }
 
-    func bottomRadius(for mode: NotchMode) -> CGFloat {
+    func bottomRadius(
+        for mode: NotchMode,
+        idleAppearance: IdleAppearance = .off,
+        idleWidth: IdleNotchWidth = .compact
+    ) -> CGFloat {
         switch mode {
-        case .idle: return 16
+        case .idle:
+            if idleAppearance.isSideWing {
+                return 12
+            }
+            return (idleAppearance.usesBottomChin && idleWidth == .compact) ? 12 : 16
         case .compact: return 14
-        case .alert: return 22
-        case .expanded: return 24
+        case .alert: return 26
+        case .expanded: return 26
         }
+    }
+
+    /// Horizontal inset from each side of the camera cutout to form the tapered idle mini-chin.
+    func taperedChinInset(
+        for mode: NotchMode,
+        idleAppearance: IdleAppearance = .off,
+        idleWidth: IdleNotchWidth = .compact
+    ) -> CGFloat {
+        guard case .idle = mode, idleAppearance.usesBottomChin, idleWidth == .compact else { return 0 }
+        let baseWidth = hasHardwareNotch ? hardwareNotchSize.width : 196
+        return max(0, (baseWidth - Self.idleChinWidth) / 2)
+    }
+
+    /// Leading transparent inset inside the centered panel when only a right-side wing is shown.
+    func leftLeadingInset(
+        for mode: NotchMode,
+        idleAppearance: IdleAppearance = .off
+    ) -> CGFloat {
+        guard case .idle = mode, idleAppearance.isSideWing else { return 0 }
+        return Self.sideWingSlotWidth
+    }
+
+    /// Anchors any given panel size horizontally centered at the top bezel of the target screen.
+    func centeredFrame(size: CGSize) -> CGRect {
+        let originX = round(screenFrame.midX - (size.width / 2))
+        let originY = round(screenFrame.maxY - size.height)
+        return CGRect(x: originX, y: originY, width: size.width, height: size.height)
     }
 
     /// Returns the NSPanel frame sized for the given mode/sub-view and anchored top-center on the target screen.
     func panelFrame(
         for mode: NotchMode,
         homeSubView: HomeSubView = .overview,
-        activeTab: NotchTab = .home
+        activeTab: NotchTab = .home,
+        idleAppearance: IdleAppearance = .off,
+        idleWidth: IdleNotchWidth = .compact
     ) -> CGRect {
-        let shell = shellSize(for: mode, homeSubView: homeSubView, activeTab: activeTab)
-        let totalWidth = shell.width + earPadding(for: mode)
-        let totalHeight = shell.height + bottomPadding(for: mode)
-        let originX = round(screenFrame.midX - (totalWidth / 2))
-        let originY = round(screenFrame.maxY - totalHeight)
-        return CGRect(x: originX, y: originY, width: totalWidth, height: totalHeight)
+        let shell = shellSize(
+            for: mode,
+            homeSubView: homeSubView,
+            activeTab: activeTab,
+            idleAppearance: idleAppearance
+        )
+        let totalWidth = shell.width + earPadding(
+            for: mode,
+            idleAppearance: idleAppearance,
+            idleWidth: idleWidth
+        )
+        let totalHeight = shell.height + bottomPadding(for: mode, idleAppearance: idleAppearance)
+        return centeredFrame(size: CGSize(width: totalWidth, height: totalHeight))
     }
 
     /// Maximum expanded NSPanel canvas frame anchored at the top-center of the target screen.
-    func panelCanvasFrame() -> CGRect {
-        panelFrame(for: .expanded)
+    func panelCanvasFrame(
+        idleAppearance: IdleAppearance = .off,
+        idleWidth: IdleNotchWidth = .compact
+    ) -> CGRect {
+        panelFrame(
+            for: .expanded,
+            idleAppearance: idleAppearance,
+            idleWidth: idleWidth
+        )
     }
 
     /// Active notch hit-test rect (shell + active ears) in AppKit panel-local bottom-left coordinates.
@@ -129,14 +212,33 @@ struct NotchGeometry: Equatable {
         for mode: NotchMode,
         homeSubView: HomeSubView = .overview,
         activeTab: NotchTab = .home,
+        idleAppearance: IdleAppearance = .off,
+        idleWidth: IdleNotchWidth = .compact,
         in containerSize: CGSize? = nil
     ) -> CGRect {
-        let size = containerSize ?? panelFrame(for: mode, homeSubView: homeSubView, activeTab: activeTab).size
-        let shell = shellSize(for: mode, homeSubView: homeSubView, activeTab: activeTab)
-        let totalWidth = shell.width + earPadding(for: mode)
-        let originX = (size.width - totalWidth) / 2
+        let size = containerSize ?? panelFrame(
+            for: mode,
+            homeSubView: homeSubView,
+            activeTab: activeTab,
+            idleAppearance: idleAppearance,
+            idleWidth: idleWidth
+        ).size
+        let shell = shellSize(
+            for: mode,
+            homeSubView: homeSubView,
+            activeTab: activeTab,
+            idleAppearance: idleAppearance
+        )
+        let totalWidth = shell.width + earPadding(
+            for: mode,
+            idleAppearance: idleAppearance,
+            idleWidth: idleWidth
+        )
+        let leftInset = leftLeadingInset(for: mode, idleAppearance: idleAppearance)
+        let originX = (size.width - totalWidth) / 2 + leftInset
         let originY = size.height - shell.height
-        return CGRect(x: originX, y: originY, width: totalWidth, height: shell.height)
+        let activeWidth = max(0, totalWidth - leftInset)
+        return CGRect(x: originX, y: originY, width: activeWidth, height: shell.height)
     }
 
     /// Preferred display: built-in notched display if present, otherwise the primary screen.

@@ -15,11 +15,17 @@ final class NotchManager: ObservableObject {
     private static let alertSoundsKey = "floqy.notifications.soundsEnabled"
     private static let showPausedPomodoroKey = "floqy.pomodoro.showPausedInNotch"
     private static let ramAlertEnabledKey = "floqy.system.ramAlertEnabled"
+    private static let restingEyesEnabledKey = "floqy.notch.restingEyesEnabled"
+    private static let idleAppearanceKey = "floqy.notch.idleAppearance"
+    private static let idleWidthKey = "floqy.notch.idleWidth"
+    private static let headphonesCardEnabledKey = "floqy.hardware.headphonesCardEnabled"
+    private static let chargingCardEnabledKey = "floqy.hardware.chargingCardEnabled"
 
     @Published var mode: NotchMode = .idle
     @Published var activeTab: NotchTab = .home
     @Published var homeSubView: HomeSubView = .overview
     @Published var compactActivity: CompactActivity = .music
+    @Published var isShowingInlineSettings: Bool = false
     @Published var hoverToExpandEnabled: Bool = true
     @Published var alertSoundsEnabled: Bool {
         didSet {
@@ -38,10 +44,41 @@ final class NotchManager: ObservableObject {
             syncCollapsedMode()
         }
     }
+    @Published var idleAppearance: IdleAppearance {
+        didSet {
+            UserDefaults.standard.set(idleAppearance.rawValue, forKey: Self.idleAppearanceKey)
+            if case .idle = mode {
+                applyPanelFrame(for: .idle, tab: activeTab, subView: homeSubView) {}
+            }
+        }
+    }
+    @Published var idleWidth: IdleNotchWidth {
+        didSet {
+            UserDefaults.standard.set(idleWidth.rawValue, forKey: Self.idleWidthKey)
+            if case .idle = mode {
+                applyPanelFrame(for: .idle, tab: activeTab, subView: homeSubView) {}
+            }
+        }
+    }
+
+    var restingEyesEnabled: Bool {
+        idleAppearance.isVisible
+    }
+    @Published var headphonesCardEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(headphonesCardEnabled, forKey: Self.headphonesCardEnabledKey)
+        }
+    }
+    @Published var chargingCardEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(chargingCardEnabled, forKey: Self.chargingCardEnabledKey)
+        }
+    }
     @Published var isEditingText: Bool = false
     @Published var isDragTargeted: Bool = false
     @Published var toastMessage: String?
     @Published private(set) var activeAlert: NotchAlert?
+    @Published private(set) var idleHappyUntil: Date?
     @Published private(set) var meetingHeadsUp: MeetingHeadsUp?
     @Published private(set) var geometry: NotchGeometry
 
@@ -53,6 +90,9 @@ final class NotchManager: ObservableObject {
     let clipboard = ClipboardService()
     let system = SystemMonitorService()
     let ai = AIService()
+    let hardware = HardwareStatusService()
+
+    var onOpenFullSettings: (() -> Void)?
 
     private var panel: NotchPanel?
     private var updateTrackingRect: (() -> Void)?
@@ -62,23 +102,49 @@ final class NotchManager: ObservableObject {
     private var alertAutoDismissTask: Task<Void, Never>?
     private var triggeredStartingMeetingIDs: Set<String> = []
     private(set) var isHoveringCompactControls: Bool = false
+    private var isTrackingMenu: Bool = false
     private var cancellables: Set<AnyCancellable> = []
     private var toggleHotKeyRef: EventHotKeyRef?
     private var clipboardHotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
     private var screenObserver: NSObjectProtocol?
+    private var menuBeginObserver: NSObjectProtocol?
+    private var menuEndObserver: NSObjectProtocol?
     private var lastNonExpandedMode: NotchMode = .idle
 
     init() {
         self.alertSoundsEnabled = UserDefaults.standard.object(forKey: Self.alertSoundsKey) as? Bool ?? true
         self.showPausedPomodoroInNotch = UserDefaults.standard.object(forKey: Self.showPausedPomodoroKey) as? Bool ?? true
         self.ramAlertEnabled = UserDefaults.standard.object(forKey: Self.ramAlertEnabledKey) as? Bool ?? true
+        if let savedRaw = UserDefaults.standard.string(forKey: Self.idleAppearanceKey),
+           let savedAppearance = IdleAppearance(rawValue: savedRaw) {
+            self.idleAppearance = savedAppearance
+        } else if let legacyEyes = UserDefaults.standard.object(forKey: Self.restingEyesEnabledKey) as? Bool,
+                  !legacyEyes {
+            self.idleAppearance = .off
+        } else {
+            self.idleAppearance = .eyes
+        }
+        if let savedWidthRaw = UserDefaults.standard.string(forKey: Self.idleWidthKey),
+           let savedWidth = IdleNotchWidth(rawValue: savedWidthRaw) {
+            self.idleWidth = savedWidth
+        } else {
+            self.idleWidth = .compact
+        }
+        self.headphonesCardEnabled = UserDefaults.standard.object(forKey: Self.headphonesCardEnabledKey) as? Bool ?? true
+        self.chargingCardEnabled = UserDefaults.standard.object(forKey: Self.chargingCardEnabledKey) as? Bool ?? true
         self.geometry = NotchGeometry(screen: NotchGeometry.preferredScreen())
     }
 
     deinit {
         if let screenObserver {
             NotificationCenter.default.removeObserver(screenObserver)
+        }
+        if let menuBeginObserver {
+            NotificationCenter.default.removeObserver(menuBeginObserver)
+        }
+        if let menuEndObserver {
+            NotificationCenter.default.removeObserver(menuEndObserver)
         }
         if let toggleHotKeyRef {
             UnregisterEventHotKey(toggleHotKeyRef)
@@ -94,11 +160,13 @@ final class NotchManager: ObservableObject {
     func start() {
         setupPanel()
         observeScreenChanges()
+        observeMenuTracking()
         registerGlobalHotKeys()
         startServices()
     }
 
     func stop() {
+        hardware.stop()
         ai.stop()
         system.stop()
         music.stop()
@@ -129,6 +197,13 @@ final class NotchManager: ObservableObject {
             self?.triggerAIFinishedAlert(agent: agent)
         }
 
+        hardware.onHeadphonesConnected = { [weak self] status in
+            self?.triggerHeadphonesConnectedAlert(status)
+        }
+        hardware.onChargingConnected = { [weak self] status in
+            self?.triggerChargingConnectedAlert(status)
+        }
+
         music.$track
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -148,6 +223,7 @@ final class NotchManager: ObservableObject {
         clipboard.start()
         system.start()
         ai.start()
+        hardware.start()
     }
 
     // MARK: - State Transitions
@@ -160,6 +236,7 @@ final class NotchManager: ObservableObject {
         }
         if !newMode.isExpanded {
             lastNonExpandedMode = newMode
+            isShowingInlineSettings = false
             if isEditingText {
                 endTextInput()
             }
@@ -168,28 +245,47 @@ final class NotchManager: ObservableObject {
             compactActivity = activity
         }
 
-        system.setSystemTabVisible(newMode.isExpanded && activeTab == .system)
+        system.setSystemTabVisible(newMode.isExpanded && !isShowingInlineSettings && activeTab == .system)
 
-        applyPanelFrame(for: newMode, tab: activeTab, subView: homeSubView) {
+        let effectiveSubView: HomeSubView = (newMode.isExpanded && isShowingInlineSettings) ? .overview : homeSubView
+        applyPanelFrame(for: newMode, tab: activeTab, subView: effectiveSubView) {
             mode = newMode
         }
     }
 
     func setHomeSubView(_ subView: HomeSubView) {
         guard subView != homeSubView else { return }
-        applyPanelFrame(for: mode, tab: activeTab, subView: subView) {
+        let effectiveSubView: HomeSubView = (mode.isExpanded && isShowingInlineSettings) ? .overview : subView
+        applyPanelFrame(for: mode, tab: activeTab, subView: effectiveSubView) {
             homeSubView = subView
         }
     }
 
     func selectTab(_ tab: NotchTab) {
-        if isEditingText && tab != activeTab {
+        if isEditingText && (tab != activeTab || isShowingInlineSettings) {
             endTextInput()
         }
         let targetMode: NotchMode = mode.isExpanded ? mode : .expanded
         system.setSystemTabVisible(targetMode.isExpanded && tab == .system)
         applyPanelFrame(for: targetMode, tab: tab, subView: homeSubView) {
+            isShowingInlineSettings = false
             activeTab = tab
+            if !mode.isExpanded {
+                mode = .expanded
+            }
+        }
+    }
+
+    func toggleInlineSettings() {
+        if isEditingText {
+            endTextInput()
+        }
+        let targetMode: NotchMode = mode.isExpanded ? mode : .expanded
+        let showSettings = !mode.isExpanded ? true : !isShowingInlineSettings
+        let effectiveSubView: HomeSubView = showSettings ? .overview : homeSubView
+        system.setSystemTabVisible(!showSettings && activeTab == .system)
+        applyPanelFrame(for: targetMode, tab: activeTab, subView: effectiveSubView) {
+            isShowingInlineSettings = showSettings
             if !mode.isExpanded {
                 mode = .expanded
             }
@@ -204,17 +300,36 @@ final class NotchManager: ObservableObject {
     ) {
         panelShrinkTask?.cancel()
 
+        let latestGeometry = NotchGeometry(screen: NotchGeometry.preferredScreen())
+        if latestGeometry != geometry {
+            geometry = latestGeometry
+        }
+
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        let targetFrame = geometry.panelFrame(for: targetMode, homeSubView: subView, activeTab: tab)
+        let targetFrame = geometry.panelFrame(
+            for: targetMode,
+            homeSubView: subView,
+            activeTab: tab,
+            idleAppearance: idleAppearance,
+            idleWidth: idleWidth
+        )
         let currentFrame = panel?.frame ?? targetFrame
         let targetArea = targetFrame.width * targetFrame.height
         let currentArea = currentFrame.width * currentFrame.height
         let isGrowing = targetFrame.width > currentFrame.width || targetFrame.height > currentFrame.height
+        let isOffCenter = abs(currentFrame.midX - geometry.screenFrame.midX) > 1
+            || abs(currentFrame.maxY - geometry.screenFrame.maxY) > 1
         let isExpanding = targetArea >= currentArea
 
-        if isGrowing {
-            // Grow and flush the NSWindow atomically before animating so SwiftUI never clips or teleports sideways.
-            resizePanelAtomically(to: targetFrame)
+        if isGrowing || isOffCenter {
+            // Grow (or re-center) atomically before animating so SwiftUI never clips or drifts off center.
+            let immediateSize = isGrowing
+                ? CGSize(
+                    width: max(currentFrame.width, targetFrame.width),
+                    height: max(currentFrame.height, targetFrame.height)
+                )
+                : targetFrame.size
+            resizePanelAtomically(to: geometry.centeredFrame(size: immediateSize))
         }
 
         let animation: Animation
@@ -232,16 +347,19 @@ final class NotchManager: ObservableObject {
         syncPanelFocusAbility()
         updateTrackingRect?()
 
-        if !isGrowing && targetFrame != currentFrame {
-            // Wait until the critically damped closing spring completes before shrinking NSWindow.
+        if (panel?.frame ?? targetFrame) != targetFrame {
+            // Wait until the closing spring finishes before shrinking the NSWindow to its final bounds.
             let shrinkDelayNs: UInt64 = reduceMotion ? 180_000_000 : 340_000_000
             panelShrinkTask = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: shrinkDelayNs)
                 guard !Task.isCancelled, let self else { return }
+                let finalSubView: HomeSubView = (self.mode.isExpanded && self.isShowingInlineSettings) ? .overview : self.homeSubView
                 let finalFrame = self.geometry.panelFrame(
                     for: self.mode,
-                    homeSubView: self.homeSubView,
-                    activeTab: self.activeTab
+                    homeSubView: finalSubView,
+                    activeTab: self.activeTab,
+                    idleAppearance: self.idleAppearance,
+                    idleWidth: self.idleWidth
                 )
                 self.resizePanelAtomically(to: finalFrame)
                 self.updateTrackingRect?()
@@ -315,6 +433,7 @@ final class NotchManager: ObservableObject {
         if alertSoundsEnabled {
             NSSound(named: NSSound.Name("Glass"))?.play()
         }
+        idleHappyUntil = Date().addingTimeInterval(6)
         activeAlert = .aiFinished(agent: agent)
         scheduleAlertAutoDismiss(after: 4.0)
         if mode.isExpanded {
@@ -323,10 +442,38 @@ final class NotchManager: ObservableObject {
         syncCollapsedMode()
     }
 
+    func triggerHeadphonesConnectedAlert(_ status: HeadphoneStatus) {
+        guard headphonesCardEnabled else { return }
+        activeAlert = .headphonesConnected(
+            name: status.name,
+            batteryPercent: status.batteryPercent,
+            isAirPods: status.isAirPods
+        )
+        scheduleAlertAutoDismiss(after: 4.0)
+        if mode.isExpanded {
+            showToast("\(status.name) connected")
+        }
+        syncCollapsedMode()
+    }
+
+    func triggerChargingConnectedAlert(_ status: BatteryStatus) {
+        guard chargingCardEnabled else { return }
+        activeAlert = .chargingConnected(
+            batteryPercent: status.percentage,
+            etaText: status.formattedETA
+        )
+        scheduleAlertAutoDismiss(after: 4.0)
+        if mode.isExpanded {
+            showToast("Charging · \(status.percentage)%")
+        }
+        syncCollapsedMode()
+    }
+
     func triggerPomodoroCompletedAlert() {
         if alertSoundsEnabled {
             NSSound(named: NSSound.Name("Glass"))?.play()
         }
+        idleHappyUntil = Date().addingTimeInterval(6)
         activeAlert = .pomodoroComplete(durationMinutes: productivity.pomodoro.durationMinutes)
         scheduleAlertAutoDismiss(after: 9)
         if mode.isExpanded {
@@ -463,10 +610,17 @@ final class NotchManager: ObservableObject {
                 self.setMode(.expanded)
             }
         } else {
-            guard mode.isExpanded, !isEditingText, !isDragTargeted else { return }
+            guard mode.isExpanded, !isEditingText, !isDragTargeted, !isTrackingMenu else { return }
             hoverTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(240))
-                guard !Task.isCancelled, let self, !self.isEditingText, !self.isDragTargeted else { return }
+                guard !Task.isCancelled,
+                      let self,
+                      !self.isEditingText,
+                      !self.isDragTargeted,
+                      !self.isTrackingMenu else { return }
+                if let panel = self.panel, panel.frame.contains(NSEvent.mouseLocation) {
+                    return
+                }
                 self.collapse()
             }
         }
@@ -501,7 +655,13 @@ final class NotchManager: ObservableObject {
         guard panel == nil else { return }
         refreshGeometry()
 
-        let initialFrame = geometry.panelFrame(for: mode, homeSubView: homeSubView, activeTab: activeTab)
+        let initialFrame = geometry.panelFrame(
+            for: mode,
+            homeSubView: homeSubView,
+            activeTab: activeTab,
+            idleAppearance: idleAppearance,
+            idleWidth: idleWidth
+        )
         let notchPanel = NotchPanel(contentRect: initialFrame)
         notchPanel.onCancel = { [weak self] in
             self?.collapse()
@@ -516,6 +676,8 @@ final class NotchManager: ObservableObject {
                     for: self.mode,
                     homeSubView: self.homeSubView,
                     activeTab: self.activeTab,
+                    idleAppearance: self.idleAppearance,
+                    idleWidth: self.idleWidth,
                     in: size
                 )
             }
@@ -561,10 +723,34 @@ final class NotchManager: ObservableObject {
                 let updated = self.geometry.panelFrame(
                     for: self.mode,
                     homeSubView: self.homeSubView,
-                    activeTab: self.activeTab
+                    activeTab: self.activeTab,
+                    idleAppearance: self.idleAppearance,
+                    idleWidth: self.idleWidth
                 )
-                self.panel?.setFrame(updated, display: true)
+                self.resizePanelAtomically(to: updated)
                 self.updateTrackingRect?()
+            }
+        }
+    }
+
+    private func observeMenuTracking() {
+        menuBeginObserver = NotificationCenter.default.addObserver(
+            forName: NSMenu.didBeginTrackingNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.isTrackingMenu = true
+                self?.hoverTask?.cancel()
+            }
+        }
+        menuEndObserver = NotificationCenter.default.addObserver(
+            forName: NSMenu.didEndTrackingNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.isTrackingMenu = false
             }
         }
     }

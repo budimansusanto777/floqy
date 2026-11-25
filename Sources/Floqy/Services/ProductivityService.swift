@@ -8,6 +8,15 @@ final class ProductivityService: ObservableObject {
 
     @Published private(set) var todos: [TodoItem] = []
     @Published private(set) var pomodoro: PomodoroState
+    @Published private(set) var completedSessionsToday: Int = 0
+
+    var currentRoundNumber: Int {
+        PomodoroState.currentRound(completedSessions: completedSessionsToday)
+    }
+
+    var lastCompletedRoundNumber: Int {
+        PomodoroState.lastCompletedRound(completedSessions: completedSessionsToday)
+    }
 
     var onPomodoroStarted: (() -> Void)?
     var onPomodoroStateChanged: (() -> Void)?
@@ -56,9 +65,13 @@ final class ProductivityService: ObservableObject {
     }
 
     func resetPomodoro() {
+        let alreadyAtStart = pomodoro.isAtInitialStart
         timer?.invalidate()
         timer = nil
         pomodoro.reset()
+        if alreadyAtStart && completedSessionsToday > 0 {
+            completedSessionsToday = 0
+        }
         onPomodoroStateChanged?()
     }
 
@@ -69,6 +82,7 @@ final class ProductivityService: ObservableObject {
                 guard let self else { return }
                 let completed = self.pomodoro.tick()
                 if completed {
+                    self.completedSessionsToday += 1
                     self.timer?.invalidate()
                     self.timer = nil
                     self.onPomodoroCompleted?()

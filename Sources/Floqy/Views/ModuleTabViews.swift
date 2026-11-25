@@ -11,13 +11,13 @@ struct NotchCard<Content: View>: View {
 
     var body: some View {
         content
-            .padding(10)
+            .padding(11)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: 14)
                     .fill(NotchColors.cardSurface)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: 14)
                             .stroke(NotchColors.cardBorder, lineWidth: 1)
                     )
             )
@@ -231,6 +231,15 @@ struct HomeTabView: View {
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
                             .foregroundStyle(NotchColors.textSecondary)
                     }
+                    Button("Overview") {
+                        manager.setHomeSubView(.overview)
+                    }
+                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(NotchColors.textSecondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .accessibilityLabel("Back to Overview")
                     Button {
                         calendar.refreshEvents()
                     } label: {
@@ -660,7 +669,7 @@ struct HomeTabView: View {
             HStack(spacing: 5) {
                 Image(systemName: productivity.pomodoro.isRunning ? "pause.fill" : "timer")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(NotchColors.statusAlert)
+                    .foregroundStyle(NotchColors.focusAccent)
                 Text(productivity.pomodoro.formattedTime)
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(NotchColors.textPrimary)
@@ -752,16 +761,37 @@ struct FilesTabView: View {
                 }
 
                 if filesTray.items.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Tray is empty.")
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundStyle(NotchColors.textPrimary)
-                        Text("Drag files from Finder onto the notch or click + Add for AirDrop, compression, OCR, and drag-out.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(NotchColors.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                    Button {
+                        let count = filesTray.pickFilesFromPanel()
+                        if count > 0 {
+                            manager.showToast(count == 1 ? "Added 1 file" : "Added \(count) files")
+                        }
+                    } label: {
+                        VStack(spacing: 6) {
+                            Image(systemName: "tray.and.arrow.down")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundStyle(NotchColors.textPrimary)
+                            Text("Drop files onto notch")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(NotchColors.textPrimary)
+                            Text("Click to browse · Drag out anytime · AirDrop · Compress · OCR")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(NotchColors.textSecondary)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(
+                            RoundedRectangle(cornerRadius: 11)
+                                .fill(Color.white.opacity(0.025))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 11)
+                                        .strokeBorder(
+                                            Color.white.opacity(0.2),
+                                            style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])
+                                        )
+                                )
+                        )
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .buttonStyle(.plain)
                 } else {
                     let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 3)
                     ScrollView(.vertical, showsIndicators: false) {
@@ -888,13 +918,19 @@ struct FilesTabView: View {
     }
 }
 
-// MARK: - 3. Notes & Todo Tab
+// MARK: - 3. Focus Tab (Warm Amber Pomodoro + Switchable To-do / Quick Notes)
+
+private enum FocusRightPane {
+    case todo
+    case notes
+}
 
 struct NotesTabView: View {
     @ObservedObject var manager: NotchManager
     @ObservedObject var obsidian: ObsidianService
     @ObservedObject var productivity: ProductivityService
 
+    @State private var rightPane: FocusRightPane = .todo
     @State private var noteDraft = ""
     @State private var selectedTags: [String] = []
     @State private var isEditingNote = false
@@ -911,10 +947,17 @@ struct NotesTabView: View {
 
     private let quickTags = ["#floqy", "#idea", "#dev"]
 
+    private static let finishTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+
     var body: some View {
         HStack(spacing: 10) {
-            obsidianCard
-            focusAndTodoCard
+            focusTimerCard
+            todoAndNotesCard
         }
         .onDisappear {
             if isAddingTodo {
@@ -929,308 +972,440 @@ struct NotesTabView: View {
         }
     }
 
-    private var obsidianCard: some View {
-        NotchCard {
+    private var focusTimerCard: some View {
+        let elapsedFraction = max(0.0, min(1.0, 1.0 - productivity.pomodoro.remainingProgress))
+        let finishDate = Date().addingTimeInterval(TimeInterval(productivity.pomodoro.remainingSeconds))
+        let currentRound = productivity.currentRoundNumber
+
+        return NotchCard {
             VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 5) {
-                    Label(obsidian.storageLabel, systemImage: "note.text")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(NotchColors.textPrimary)
-                        .lineLimit(1)
+                HStack(alignment: .top, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Focus · Session \(currentRound) of 4")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(NotchColors.textSecondary)
+
+                        timerDisplayControl
+
+                        HStack(spacing: 4) {
+                            Text(Self.finishTimeFormatter.string(from: finishDate))
+                                .foregroundStyle(NotchColors.textSecondary)
+                            Text("until done")
+                                .fontWeight(.semibold)
+                                .foregroundStyle(NotchColors.focusAccent)
+                        }
+                        .font(.system(size: 10.5))
+                        .monospacedDigit()
+                    }
 
                     Spacer(minLength: 4)
 
-                    Menu {
-                        ForEach(ObsidianNoteTarget.allCases) { target in
-                            Button(target.rawValue) {
-                                obsidian.target = target
+                    HStack(spacing: 5) {
+                        Button(productivity.pomodoro.isRunning ? "Pause" : "Start") {
+                            if isEditingTimer {
+                                commitTimerEdit()
                             }
+                            productivity.togglePomodoro()
                         }
-                    } label: {
-                        HStack(spacing: 3) {
-                            Text(obsidian.target.rawValue)
-                                .font(.system(size: 10, weight: .medium))
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 8, weight: .semibold))
-                        }
-                        .foregroundStyle(NotchColors.textSecondary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.white.opacity(0.06))
-                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(NotchColors.cardBorder, lineWidth: 1))
-                        )
-                    }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-
-                    Menu {
-                        Button("Open Folder") {
-                            obsidian.openActiveNotesFolder()
-                        }
-                        Button("Choose Folder…") {
-                            if isEditingNote {
-                                endNoteEdit()
-                            }
-                            obsidian.chooseVaultFolder()
-                        }
-                        if obsidian.isVaultConfigured {
-                            Divider()
-                            Button("Use Default Folder") {
-                                obsidian.disconnectVault()
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "folder")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(NotchColors.textSecondary)
-                            .frame(width: 22, height: 22)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(Color.white.opacity(0.06))
-                                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(NotchColors.cardBorder, lineWidth: 1))
-                            )
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .accessibilityLabel("Notes folder options")
-                    .help("Notes folder: \(obsidian.storageLabel)")
-                }
-
-                if isEditingNote {
-                    TextField("Write a quick note…", text: $noteDraft)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 11))
-                        .foregroundStyle(NotchColors.textPrimary)
+                        .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 7))
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(NotchColors.focusAccent)
                         .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.white.opacity(0.06))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(NotchColors.accentPrimary, lineWidth: 1)
-                                )
-                        )
-                        .focused($isNoteFieldFocused)
-                        .onSubmit {
-                            appendObsidianNote()
+                        .padding(.vertical, 4)
+
+                        Button {
+                            if isEditingTimer {
+                                cancelTimerEdit()
+                            }
+                            productivity.resetPomodoro()
+                        } label: {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(NotchColors.textSecondary)
+                                .frame(width: 22, height: 22)
                         }
-                        .onKeyPress(.escape) {
-                            endNoteEdit()
-                            return .handled
-                        }
-                } else {
-                    Button {
-                        beginNoteEdit()
-                    } label: {
-                        Text(noteDraft.isEmpty ? "Click to write a note for \(obsidian.target.rawValue)…" : noteDraft)
-                            .font(.system(size: 11))
-                            .foregroundStyle(noteDraft.isEmpty ? NotchColors.textSecondary : NotchColors.textPrimary)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                            .padding(8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.white.opacity(0.04))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(NotchColors.cardBorder, lineWidth: 1)
-                                    )
-                            )
+                        .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                        .accessibilityLabel("Reset Focus Timer")
                     }
-                    .buttonStyle(.plain)
                 }
 
-                HStack(spacing: 4) {
-                    ForEach(quickTags, id: \.self) { tag in
-                        let isActive = selectedTags.contains(tag)
-                        Button(tag) {
-                            toggleTag(tag)
-                        }
-                        .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5, isSelected: isActive))
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(isActive ? NotchColors.textPrimary : NotchColors.textSecondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
+                Spacer(minLength: 0)
+
+                HStack {
+                    ForEach(1...4, id: \.self) { step in
+                        roundNode(label: "\(step)", isDone: step < currentRound, isActive: step == currentRound)
+                        Spacer()
                     }
+                    roundNode(label: "Long", isDone: false, isActive: false)
+                }
+                .padding(.horizontal, 4)
+
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.white.opacity(0.12))
+                        Capsule()
+                            .fill(NotchColors.focusAccent)
+                            .frame(width: max(4, geo.size.width * elapsedFraction))
+                    }
+                }
+                .frame(height: 4)
+            }
+        }
+    }
+
+    private func roundNode(label: String, isDone: Bool, isActive: Bool) -> some View {
+        VStack(spacing: 4) {
+            Circle()
+                .fill(isDone ? NotchColors.focusAccent : (isActive ? NotchColors.textPrimary : Color.white.opacity(0.2)))
+                .frame(width: isActive ? 9 : 7, height: isActive ? 9 : 7)
+                .overlay(
+                    Circle()
+                        .stroke(isActive ? NotchColors.focusAccent : Color.clear, lineWidth: 2)
+                )
+            Text(label)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(NotchColors.textSecondary)
+        }
+    }
+
+    private var todoAndNotesCard: some View {
+        let doneCount = productivity.todos.filter(\.isDone).count
+
+        return NotchCard {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 6) {
+                    HStack(spacing: 2) {
+                        paneSwitchButton("To-do (\(doneCount)/\(productivity.todos.count))", pane: .todo)
+                        paneSwitchButton("Notes", pane: .notes)
+                    }
+                    .padding(2)
+                    .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.06)))
 
                     Spacer(minLength: 4)
 
-                    Button("Save") {
-                        appendObsidianNote()
+                    if rightPane == .todo {
+                        if !isAddingTodo {
+                            Button {
+                                if isEditingTimer { cancelTimerEdit() }
+                                if isEditingNote { endNoteEdit() }
+                                isAddingTodo = true
+                                manager.beginTextInput()
+                                isTodoFieldFocused = true
+                            } label: {
+                                Label("Add", systemImage: "plus")
+                                    .font(.system(size: 10.5, weight: .semibold))
+                                    .foregroundStyle(NotchColors.textPrimary)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                            }
+                            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                        }
+                    } else {
+                        notesFolderMenus
                     }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(NotchColors.notchBackground)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(NotchColors.accentPrimary))
                 }
 
-                if let error = obsidian.lastError {
-                    Text(error)
-                        .font(.system(size: 10))
-                        .foregroundStyle(NotchColors.statusAlert)
-                        .lineLimit(1)
-                } else if let saved = obsidian.lastSavedSummary {
-                    Text(saved)
-                        .font(.system(size: 10))
-                        .foregroundStyle(NotchColors.statusHealthy)
-                        .lineLimit(1)
-                } else if let latest = obsidian.recentNotes.first {
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(latest, forType: .string)
-                        manager.showToast("Copied latest note")
-                    } label: {
-                        Text(latest)
-                            .font(.system(size: 10))
-                            .foregroundStyle(NotchColors.textSecondary)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Click to copy latest note")
+                if rightPane == .todo {
+                    todoListContent
+                } else {
+                    quickNotesContent
                 }
             }
         }
     }
 
-    private var focusAndTodoCard: some View {
-        NotchCard {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    timerDisplayControl
+    private func paneSwitchButton(_ title: String, pane: FocusRightPane) -> some View {
+        let isSelected = rightPane == pane
+        return Button {
+            if pane == .todo && isEditingNote {
+                endNoteEdit()
+            } else if pane == .notes && isAddingTodo {
+                cancelNewTodo()
+            }
+            rightPane = pane
+        } label: {
+            Text(title)
+                .font(.system(size: 10.5, weight: isSelected ? .semibold : .medium))
+                .foregroundStyle(isSelected ? NotchColors.textPrimary : NotchColors.textSecondary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(isSelected ? Color.white.opacity(0.15) : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+    }
 
-                    Spacer()
-
-                    Button(productivity.pomodoro.isRunning ? "Pause" : "Start") {
-                        if isEditingTimer {
-                            commitTimerEdit()
-                        }
-                        productivity.togglePomodoro()
+    @ViewBuilder
+    private var todoListContent: some View {
+        if isAddingTodo {
+            HStack(spacing: 5) {
+                TextField("New task…", text: $newTodoText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundStyle(NotchColors.textPrimary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(Color.white.opacity(0.06))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7)
+                                    .stroke(NotchColors.accentPrimary, lineWidth: 1)
+                            )
+                    )
+                    .focused($isTodoFieldFocused)
+                    .onSubmit {
+                        commitNewTodo()
                     }
-                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(NotchColors.statusAlert)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
 
-                    Button {
-                        if isEditingTimer {
-                            cancelTimerEdit()
-                        }
-                        productivity.resetPomodoro()
-                    } label: {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(NotchColors.textSecondary)
-                            .frame(width: 22, height: 22)
-                    }
-                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
-                    .accessibilityLabel("Reset Focus Timer")
-                }
-
-                Divider().overlay(NotchColors.cardBorder)
-
-                if productivity.todos.isEmpty {
-                    Text("No tasks yet.")
-                        .font(.system(size: 11))
+                Button {
+                    cancelNewTodo()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(NotchColors.textSecondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                } else {
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(spacing: 4) {
-                            ForEach(productivity.todos) { item in
-                                HStack(spacing: 6) {
-                                    Button {
-                                        productivity.toggleTodo(id: item.id)
-                                    } label: {
-                                        Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(
-                                                item.isDone ? NotchColors.statusHealthy : NotchColors.textSecondary
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                .accessibilityLabel("Cancel new task")
+            }
+        }
+
+        if productivity.todos.isEmpty {
+            Text("No tasks yet.")
+                .font(.system(size: 11))
+                .foregroundStyle(NotchColors.textSecondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        } else {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 5) {
+                    ForEach(productivity.todos) { item in
+                        HStack(spacing: 7) {
+                            Button {
+                                productivity.toggleTodo(id: item.id)
+                            } label: {
+                                HStack(spacing: 7) {
+                                    ZStack {
+                                        Circle()
+                                            .stroke(
+                                                item.isDone ? NotchColors.statusHealthy : Color.white.opacity(0.36),
+                                                lineWidth: 1.5
                                             )
+                                            .background(
+                                                Circle().fill(item.isDone ? NotchColors.statusHealthy : Color.clear)
+                                            )
+                                        if item.isDone {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 8, weight: .bold))
+                                                .foregroundStyle(NotchColors.notchBackground)
+                                        }
                                     }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel(item.isDone ? "Mark \(item.title) incomplete" : "Mark \(item.title) complete")
+                                    .frame(width: 14, height: 14)
 
                                     Text(item.title)
                                         .font(.system(size: 11))
                                         .strikethrough(item.isDone)
                                         .foregroundStyle(item.isDone ? NotchColors.textSecondary : NotchColors.textPrimary)
                                         .lineLimit(1)
-
-                                    Spacer(minLength: 2)
-
-                                    Button {
-                                        productivity.deleteTodo(id: item.id)
-                                    } label: {
-                                        Image(systemName: "xmark")
-                                            .font(.system(size: 9, weight: .semibold))
-                                            .foregroundStyle(NotchColors.textSecondary)
-                                            .frame(width: 16, height: 16)
-                                    }
-                                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 4))
-                                    .accessibilityLabel("Delete \(item.title)")
                                 }
                             }
-                        }
-                    }
-                }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(item.isDone ? "Mark \(item.title) incomplete" : "Mark \(item.title) complete")
 
-                if isAddingTodo {
-                    HStack(spacing: 5) {
-                        TextField("New task…", text: $newTodoText)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 11))
-                            .foregroundStyle(NotchColors.textPrimary)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(Color.white.opacity(0.06))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .stroke(NotchColors.accentPrimary, lineWidth: 1)
-                                    )
-                            )
-                            .focused($isTodoFieldFocused)
-                            .onSubmit {
-                                commitNewTodo()
+                            Spacer(minLength: 2)
+
+                            Button {
+                                productivity.deleteTodo(id: item.id)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(NotchColors.textSecondary)
+                                    .frame(width: 16, height: 16)
                             }
-
-                        Button {
-                            cancelNewTodo()
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(NotchColors.textSecondary)
-                                .frame(width: 22, height: 22)
+                            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 4))
+                            .accessibilityLabel("Delete \(item.title)")
                         }
-                        .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
-                        .accessibilityLabel("Cancel new task")
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(item.isDone ? NotchColors.statusHealthy.opacity(0.14) : Color.white.opacity(0.055))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(
+                                            item.isDone ? NotchColors.statusHealthy.opacity(0.24) : NotchColors.cardBorder,
+                                            lineWidth: 1
+                                        )
+                                )
+                        )
                     }
-                } else {
-                    Button {
-                        if isEditingTimer { cancelTimerEdit() }
-                        if isEditingNote { endNoteEdit() }
-                        isAddingTodo = true
-                        manager.beginTextInput()
-                        isTodoFieldFocused = true
-                    } label: {
-                        Label("Add todo", systemImage: "plus")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(NotchColors.accentPrimary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                    }
-                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
                 }
             }
+        }
+    }
+
+    private var notesFolderMenus: some View {
+        HStack(spacing: 4) {
+            Menu {
+                ForEach(ObsidianNoteTarget.allCases) { target in
+                    Button(target.rawValue) {
+                        obsidian.target = target
+                    }
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Text(obsidian.target.rawValue)
+                        .font(.system(size: 10, weight: .medium))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                }
+                .foregroundStyle(NotchColors.textSecondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.white.opacity(0.06))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(NotchColors.cardBorder, lineWidth: 1))
+                )
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
+            Menu {
+                Button("Open Folder") {
+                    obsidian.openActiveNotesFolder()
+                }
+                Button("Choose Folder…") {
+                    if isEditingNote {
+                        endNoteEdit()
+                    }
+                    obsidian.chooseVaultFolder()
+                }
+                if obsidian.isVaultConfigured {
+                    Divider()
+                    Button("Use Default Folder") {
+                        obsidian.disconnectVault()
+                    }
+                }
+            } label: {
+                Image(systemName: "folder")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NotchColors.textSecondary)
+                    .frame(width: 22, height: 22)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.white.opacity(0.06))
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(NotchColors.cardBorder, lineWidth: 1))
+                    )
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel("Notes folder options")
+            .help("Notes folder: \(obsidian.storageLabel)")
+        }
+    }
+
+    @ViewBuilder
+    private var quickNotesContent: some View {
+        if isEditingNote {
+            TextField("Write a quick note…", text: $noteDraft)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundStyle(NotchColors.textPrimary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.white.opacity(0.06))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(NotchColors.accentPrimary, lineWidth: 1)
+                        )
+                )
+                .focused($isNoteFieldFocused)
+                .onSubmit {
+                    appendObsidianNote()
+                }
+                .onKeyPress(.escape) {
+                    endNoteEdit()
+                    return .handled
+                }
+        } else {
+            Button {
+                beginNoteEdit()
+            } label: {
+                Text(noteDraft.isEmpty ? "Click to write a note for \(obsidian.target.rawValue)…" : noteDraft)
+                    .font(.system(size: 11))
+                    .foregroundStyle(noteDraft.isEmpty ? NotchColors.textSecondary : NotchColors.textPrimary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.white.opacity(0.04))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(NotchColors.cardBorder, lineWidth: 1)
+                            )
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+
+        HStack(spacing: 4) {
+            ForEach(quickTags, id: \.self) { tag in
+                let isActive = selectedTags.contains(tag)
+                Button(tag) {
+                    toggleTag(tag)
+                }
+                .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5, isSelected: isActive))
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(isActive ? NotchColors.textPrimary : NotchColors.textSecondary)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+            }
+
+            Spacer(minLength: 4)
+
+            Button("Save") {
+                appendObsidianNote()
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundStyle(NotchColors.notchBackground)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 6).fill(NotchColors.accentPrimary))
+        }
+
+        if let error = obsidian.lastError {
+            Text(error)
+                .font(.system(size: 10))
+                .foregroundStyle(NotchColors.statusAlert)
+                .lineLimit(1)
+        } else if let saved = obsidian.lastSavedSummary {
+            Text(saved)
+                .font(.system(size: 10))
+                .foregroundStyle(NotchColors.statusHealthy)
+                .lineLimit(1)
+        } else if let latest = obsidian.recentNotes.first {
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(latest, forType: .string)
+                manager.showToast("Copied latest note")
+            } label: {
+                Text(latest)
+                    .font(.system(size: 10))
+                    .foregroundStyle(NotchColors.textSecondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .help("Click to copy latest note")
         }
     }
 
@@ -1240,17 +1415,17 @@ struct NotesTabView: View {
             HStack(spacing: 4) {
                 TextField("25", text: $timerMinutesDraft)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .font(.system(size: 20, weight: .bold, design: .monospaced))
                     .foregroundStyle(NotchColors.textPrimary)
                     .multilineTextAlignment(.center)
-                    .frame(width: 40)
+                    .frame(width: 54)
                     .padding(.vertical, 2)
                     .background(
-                        RoundedRectangle(cornerRadius: 6)
+                        RoundedRectangle(cornerRadius: 7)
                             .fill(Color.white.opacity(0.06))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(NotchColors.accentPrimary, lineWidth: 1)
+                                RoundedRectangle(cornerRadius: 7)
+                                    .stroke(NotchColors.focusAccent, lineWidth: 1)
                             )
                     )
                     .focused($isTimerFieldFocused)
@@ -1263,7 +1438,7 @@ struct NotesTabView: View {
                     }
 
                 Text("min")
-                    .font(.system(size: 10.5, weight: .medium))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(NotchColors.textSecondary)
             }
         } else if !productivity.pomodoro.isRunning {
@@ -1271,12 +1446,11 @@ struct NotesTabView: View {
                 startTimerEdit()
             } label: {
                 Text(productivity.pomodoro.formattedTime)
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .font(.system(size: 26, weight: .bold, design: .monospaced))
+                    .monospacedDigit()
                     .foregroundStyle(NotchColors.textPrimary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
             }
-            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+            .buttonStyle(.plain)
             .simultaneousGesture(
                 DragGesture(minimumDistance: 8)
                     .onChanged { value in
@@ -1295,8 +1469,9 @@ struct NotesTabView: View {
             .help("Click to type minutes or drag up/down to adjust")
         } else {
             Text(productivity.pomodoro.formattedTime)
-                .font(.system(size: 14, weight: .bold, design: .monospaced))
-                .foregroundStyle(NotchColors.statusAlert)
+                .font(.system(size: 26, weight: .bold, design: .monospaced))
+                .monospacedDigit()
+                .foregroundStyle(NotchColors.focusAccent)
         }
     }
 
@@ -2005,5 +2180,150 @@ struct SystemTabView: View {
         case .warning: return NotchColors.statusWarning
         case .critical: return NotchColors.statusAlert
         }
+    }
+}
+
+// MARK: - 7. Inline Settings Tab (Gear Button Beside System)
+
+struct InlineSettingsTabView: View {
+    @ObservedObject var manager: NotchManager
+
+    var body: some View {
+        HStack(spacing: 10) {
+            NotchCard {
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("Idle Notch & Hardware")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(NotchColors.textSecondary)
+
+                    HStack(spacing: 8) {
+                        Text("Idle notch")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(NotchColors.textPrimary)
+                        Spacer(minLength: 8)
+                        Menu {
+                            ForEach(IdleAppearance.allCases) { appearance in
+                                Button {
+                                    manager.idleAppearance = appearance
+                                } label: {
+                                    if manager.idleAppearance == appearance {
+                                        Label(appearance.title, systemImage: "checkmark")
+                                    } else {
+                                        Text(appearance.title)
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Text(manager.idleAppearance.title)
+                                    .font(.system(size: 11, weight: .semibold))
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.system(size: 8.5, weight: .semibold))
+                                    .foregroundStyle(NotchColors.textSecondary)
+                            }
+                            .foregroundStyle(NotchColors.textPrimary)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(Color.white.opacity(0.08))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
+                            )
+                        }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                    }
+
+                    HStack(spacing: 8) {
+                        Text("Idle width")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(NotchColors.textPrimary)
+                        Spacer(minLength: 8)
+                        HStack(spacing: 2) {
+                            ForEach(IdleNotchWidth.allCases) { widthOption in
+                                let selected = manager.idleWidth == widthOption
+                                Button {
+                                    manager.idleWidth = widthOption
+                                } label: {
+                                    Text(widthOption.title)
+                                        .font(.system(size: 10.5, weight: selected ? .semibold : .medium))
+                                        .foregroundStyle(selected ? NotchColors.textPrimary : NotchColors.textSecondary)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 3)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                                                .fill(selected ? NotchColors.statusHealthy.opacity(0.24) : Color.clear)
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                                                .strokeBorder(
+                                                    selected ? NotchColors.statusHealthy.opacity(0.75) : Color.clear,
+                                                    lineWidth: 1
+                                                )
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color.white.opacity(0.06))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                        )
+                        .opacity(manager.idleAppearance.usesBottomChin ? 1 : 0.4)
+                        .disabled(!manager.idleAppearance.usesBottomChin)
+                    }
+
+                    toggleRow("Headphones connected card", isOn: $manager.headphonesCardEnabled)
+                    toggleRow("Charging status card", isOn: $manager.chargingCardEnabled)
+
+                    Spacer(minLength: 0)
+                }
+            }
+
+            NotchCard {
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("Notch & Alerts")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(NotchColors.textSecondary)
+
+                    toggleRow("Auto-expand on hover", isOn: $manager.hoverToExpandEnabled)
+                    toggleRow("Notification sounds", isOn: $manager.alertSoundsEnabled)
+                    toggleRow("RAM ≥ \(SystemLogic.ramAlertThresholdPercent)% alert", isOn: $manager.ramAlertEnabled)
+
+                    Spacer(minLength: 0)
+
+                    HStack {
+                        Text("Calendar & Notes Folder")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(NotchColors.textSecondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Button("All Settings…") {
+                            manager.onOpenFullSettings?()
+                        }
+                        .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(NotchColors.textPrimary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                    }
+                }
+            }
+        }
+    }
+
+    private func toggleRow(_ title: String, isOn: Binding<Bool>) -> some View {
+        Toggle(title, isOn: isOn)
+            .toggleStyle(NotchSwitchToggleStyle())
+            .font(.system(size: 11.5))
+            .foregroundStyle(NotchColors.textPrimary)
     }
 }

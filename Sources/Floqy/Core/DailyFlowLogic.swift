@@ -107,6 +107,19 @@ struct PomodoroState: Equatable {
         isRunning = false
     }
 
+    var isAtInitialStart: Bool {
+        !isRunning && remainingSeconds == durationSeconds
+    }
+
+    static func currentRound(completedSessions: Int) -> Int {
+        (max(0, completedSessions) % 4) + 1
+    }
+
+    static func lastCompletedRound(completedSessions: Int) -> Int {
+        guard completedSessions > 0 else { return 1 }
+        return ((completedSessions - 1) % 4) + 1
+    }
+
     mutating func reset() {
         isRunning = false
         remainingSeconds = durationSeconds

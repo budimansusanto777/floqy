@@ -30,6 +30,10 @@ final class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { allowsKeyFocus }
     override var canBecomeMain: Bool { false }
 
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
+
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
     }
@@ -49,6 +53,7 @@ final class NotchPassthroughContainerView<Content: View>: NSView {
 
     init(rootView: Content, frame: CGRect, activeHitRectProvider: @escaping (CGSize) -> CGRect) {
         self.hostingView = NSHostingView(rootView: rootView)
+        self.hostingView.sizingOptions = []
         self.activeHitRectProvider = activeHitRectProvider
         super.init(frame: frame)
 
