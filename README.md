@@ -78,7 +78,7 @@ open build/Floqy.app
 
 - [x] **Phase 0** — Repository setup, Core Notch Engine (`NSScreen` geometry, `NSPanel`, concave ears, spring states), global shortcut (`⌘⇧Space`), menu bar & Settings shell
 - [x] **Phase 1** — Daily Flow Core (`Home`: Spotify/Apple Music, EventKit Calendar, Pomodoro & Todo)
-- [ ] **Phase 2** — Productivity Power Tools (`Files` Smart Tray, `Notes → Obsidian`, `Copy` Clipboard Manager)
+- [x] **Phase 2** — Productivity Power Tools (`Files` Smart Tray, `Notes → Obsidian`, `Copy` Clipboard Manager)
 - [ ] **Phase 3** — Unified `System` Tab (Memory Monitor + Dev Live Activity + `floqy` CLI)
 - [ ] **Phase 4** — AI Agent Integration (BYOK + Ollama + Cross-Module Context)
 - [ ] **Phase 5** — Polish, Launch at Login, multi-monitor & `.dmg` distribution

@@ -3,7 +3,7 @@ import Carbon.HIToolbox
 import Combine
 import SwiftUI
 
-/// Central coordinator for notch state, hover debounce, screen geometry, global hotkeys, and Phase 1 services.
+/// Central coordinator for notch state, hover debounce, screen geometry, global hotkeys, and module services.
 @MainActor
 final class NotchManager: ObservableObject {
     @Published var mode: NotchMode = .idle
@@ -12,13 +12,16 @@ final class NotchManager: ObservableObject {
     @Published var compactActivity: CompactActivity = .music
     @Published var hoverToExpandEnabled: Bool = true
     @Published var isEditingText: Bool = false
-    @Published var droppedFileNames: [String] = []
+    @Published var isDragTargeted: Bool = false
     @Published var toastMessage: String?
     @Published private(set) var geometry: NotchGeometry
 
     let music = MusicService()
     let calendar = CalendarService()
     let productivity = ProductivityService()
+    let filesTray = FilesTrayService()
+    let obsidian = ObsidianService()
+    let clipboard = ClipboardService()
 
     private var panel: NotchPanel?
     private var updateTrackingRect: (() -> Void)?
@@ -26,7 +29,8 @@ final class NotchManager: ObservableObject {
     private var hoverTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
     private var cancellables: Set<AnyCancellable> = []
-    private var hotKeyRef: EventHotKeyRef?
+    private var toggleHotKeyRef: EventHotKeyRef?
+    private var clipboardHotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
     private var screenObserver: NSObjectProtocol?
     private var lastNonExpandedMode: NotchMode = .idle
@@ -39,8 +43,11 @@ final class NotchManager: ObservableObject {
         if let screenObserver {
             NotificationCenter.default.removeObserver(screenObserver)
         }
-        if let hotKeyRef {
-            UnregisterEventHotKey(hotKeyRef)
+        if let toggleHotKeyRef {
+            UnregisterEventHotKey(toggleHotKeyRef)
+        }
+        if let clipboardHotKeyRef {
+            UnregisterEventHotKey(clipboardHotKeyRef)
         }
         if let eventHandlerRef {
             RemoveEventHandler(eventHandlerRef)
@@ -50,11 +57,11 @@ final class NotchManager: ObservableObject {
     func start() {
         setupPanel()
         observeScreenChanges()
-        registerGlobalHotKey()
-        startPhase1Services()
+        registerGlobalHotKeys()
+        startServices()
     }
 
-    private func startPhase1Services() {
+    private func startServices() {
         productivity.onPomodoroStarted = { [weak self] in
             self?.compactActivity = .pomodoro
         }
@@ -76,6 +83,7 @@ final class NotchManager: ObservableObject {
 
         music.start()
         calendar.start()
+        clipboard.start()
     }
 
     // MARK: - State Transitions
@@ -106,7 +114,7 @@ final class NotchManager: ObservableObject {
     }
 
     func selectTab(_ tab: NotchTab) {
-        if isEditingText && tab != .notes {
+        if isEditingText && tab != activeTab {
             endTextInput()
         }
         let targetMode: NotchMode = mode.isExpanded ? mode : .expanded
@@ -199,6 +207,18 @@ final class NotchManager: ObservableObject {
         }
     }
 
+    func handleDragEntered() {
+        isDragTargeted = true
+        hoverTask?.cancel()
+        if !mode.isExpanded || activeTab != .files {
+            selectTab(.files)
+        }
+    }
+
+    func handleDragExited() {
+        isDragTargeted = false
+    }
+
     func handleHoverChanged(_ hovering: Bool) {
         guard hoverToExpandEnabled else { return }
         hoverTask?.cancel()
@@ -211,34 +231,22 @@ final class NotchManager: ObservableObject {
                 self?.setMode(.expanded)
             }
         } else {
-            guard mode.isExpanded, !isEditingText else { return }
+            guard mode.isExpanded, !isEditingText, !isDragTargeted else { return }
             hoverTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(240))
-                guard !Task.isCancelled, let self, !self.isEditingText else { return }
+                guard !Task.isCancelled, let self, !self.isEditingText, !self.isDragTargeted else { return }
                 self.collapse()
             }
         }
     }
 
-    // MARK: - Phase 0 File Staging
+    // MARK: - Phase 2 Files Tray Staging
 
-    func addDroppedFiles(_ urls: [URL]) {
-        let names = urls.map(\.lastPathComponent).filter { !$0.isEmpty }
-        guard !names.isEmpty else { return }
-        for name in names where !droppedFileNames.contains(name) {
-            droppedFileNames.insert(name, at: 0)
-        }
+    func stageDroppedFiles(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        filesTray.stageFiles(urls)
         selectTab(.files)
-        showToast(names.count == 1 ? "Staged \(names[0])" : "Staged \(names.count) files")
-    }
-
-    func removeDroppedFile(at index: Int) {
-        guard droppedFileNames.indices.contains(index) else { return }
-        droppedFileNames.remove(at: index)
-    }
-
-    func clearDroppedFiles() {
-        droppedFileNames.removeAll()
+        showToast(urls.count == 1 ? "Staged \(urls[0].lastPathComponent)" : "Staged \(urls.count) files")
     }
 
     func showToast(_ message: String) {
@@ -283,6 +291,15 @@ final class NotchManager: ObservableObject {
         container.onHoverChanged = { [weak self] hovering in
             self?.handleHoverChanged(hovering)
         }
+        container.onDragEntered = { [weak self] in
+            self?.handleDragEntered()
+        }
+        container.onDragExited = { [weak self] in
+            self?.handleDragExited()
+        }
+        container.onFilesDropped = { [weak self] urls in
+            self?.stageDroppedFiles(urls)
+        }
         self.updateTrackingRect = { [weak container] in
             container?.updateTrackingRect()
         }
@@ -324,9 +341,9 @@ final class NotchManager: ObservableObject {
         geometry = NotchGeometry(screen: NotchGeometry.preferredScreen())
     }
 
-    // MARK: - Global Shortcut (Cmd + Shift + Space)
+    // MARK: - Global Shortcuts (Cmd+Shift+Space & Cmd+Shift+V)
 
-    private func registerGlobalHotKey() {
+    private func registerGlobalHotKeys() {
         var eventType = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard),
             eventKind: UInt32(kEventHotKeyPressed)
@@ -335,11 +352,29 @@ final class NotchManager: ObservableObject {
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         let status = InstallEventHandler(
             GetApplicationEventTarget(),
-            { _, _, userData in
-                guard let userData else { return noErr }
+            { _, event, userData in
+                guard let userData, let event else { return noErr }
+                var hotKeyID = EventHotKeyID()
+                GetEventParameter(
+                    event,
+                    EventParamName(kEventParamDirectObject),
+                    EventParamType(typeEventHotKeyID),
+                    nil,
+                    MemoryLayout<EventHotKeyID>.size,
+                    nil,
+                    &hotKeyID
+                )
                 let manager = Unmanaged<NotchManager>.fromOpaque(userData).takeUnretainedValue()
                 Task { @MainActor in
-                    manager.toggleExpanded()
+                    if hotKeyID.id == 2 {
+                        if manager.mode.isExpanded && manager.activeTab == .clipboard {
+                            manager.collapse()
+                        } else {
+                            manager.selectTab(.clipboard)
+                        }
+                    } else {
+                        manager.toggleExpanded()
+                    }
                 }
                 return noErr
             },
@@ -351,14 +386,25 @@ final class NotchManager: ObservableObject {
 
         guard status == noErr else { return }
 
-        let hotKeyID = EventHotKeyID(signature: OSType(0x464C_5159), id: 1) // 'FLQY'
+        let signature = OSType(0x464C_5159) // 'FLQY'
+        let toggleID = EventHotKeyID(signature: signature, id: 1)
         RegisterEventHotKey(
             UInt32(kVK_Space),
             UInt32(cmdKey | shiftKey),
-            hotKeyID,
+            toggleID,
             GetApplicationEventTarget(),
             0,
-            &hotKeyRef
+            &toggleHotKeyRef
+        )
+
+        let clipboardID = EventHotKeyID(signature: signature, id: 2)
+        RegisterEventHotKey(
+            UInt32(kVK_ANSI_V),
+            UInt32(cmdKey | shiftKey),
+            clipboardID,
+            GetApplicationEventTarget(),
+            0,
+            &clipboardHotKeyRef
         )
     }
 }

@@ -12,7 +12,8 @@ enum CoreSelfCheck {
         checkSixTabsAreSymmetrical()
         checkDailyFlowLogic()
         checkMonthGridLogic()
-        print("CoreSelfCheck: 8/8 checks passed.")
+        checkProductivityToolsLogic()
+        print("CoreSelfCheck: 9/9 checks passed.")
     }
 
     private static func checkNotchedScreenDetection() {
@@ -187,7 +188,6 @@ enum CoreSelfCheck {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(secondsFromGMT: 0)!
 
-        // August 2026 starts on Saturday (weekday 7 -> 6 leading blanks + 31 days = 37 cells -> 6 rows)
         let augAnchor = cal.date(from: DateComponents(year: 2026, month: 8, day: 15))!
         let augBounds = CalendarLogic.monthBounds(for: augAnchor, calendar: cal)
         let augCells = CalendarLogic.monthGridCells(for: augAnchor, calendar: cal)
@@ -196,5 +196,48 @@ enum CoreSelfCheck {
         precondition(augCells.count == 37, "August 2026 grid should have 6 leading blanks + 31 days")
         precondition(augCells.prefix(6).allSatisfy { $0.date == nil }, "First 6 cells must be blank")
         precondition(augCells.last?.dayNumber == 31, "Last day should be 31")
+    }
+
+    private static func checkProductivityToolsLogic() {
+        // File classification & formatting
+        precondition(StagedFileItem.classify(pathExtension: "heic") == .image, "HEIC should classify as image")
+        precondition(StagedFileItem.classify(pathExtension: "PDF") == .pdf, "PDF classification mismatch")
+        precondition(StagedFileItem.classify(pathExtension: "swift") == .code, "Swift should classify as code")
+        precondition(StagedFileItem.formatByteCount(840 * 1024) == "840 KB", "KB formatting mismatch")
+        precondition(StagedFileItem.formatByteCount(2_516_582) == "2.4 MB", "MB formatting mismatch")
+
+        // Obsidian path & entry formatting
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let refDate = cal.date(from: DateComponents(year: 2026, month: 11, day: 25, hour: 9, minute: 5))!
+        precondition(
+            ObsidianLogic.resolveRelativePath(for: .quickIdeas, date: refDate) == "Inbox/Quick-Ideas.md",
+            "Quick Ideas path mismatch"
+        )
+        let entry = ObsidianLogic.formatMarkdownEntry(
+            body: "Test note #floqy",
+            tags: ["#floqy", "idea", "#IDEA"],
+            timestamp: refDate
+        )
+        precondition(entry.hasSuffix("Test note #floqy #idea\n"), "Obsidian entry deduplication mismatch: \(entry)")
+
+        let vault = URL(fileURLWithPath: "/tmp/MyVault")
+        precondition(ObsidianLogic.safeTargetURL(vaultURL: vault, relativePath: "Daily/2026-11-25.md") != nil, "Valid vault path rejected")
+        precondition(ObsidianLogic.safeTargetURL(vaultURL: vault, relativePath: "../../etc/passwd") == nil, "Path traversal must be blocked")
+
+        // Clipboard classification & filtering
+        precondition(ClipboardLogic.classifyText("https://github.com/budimansusanto777/floqy") == .url, "URL classification failed")
+        precondition(ClipboardLogic.classifyText("func hello() { return }") == .code, "Code classification failed")
+        precondition(ClipboardLogic.classifyText("Plain reminder note") == .text, "Plain text classification failed")
+
+        let older = ClipboardEntry(kind: .text, textContent: "alpha note", isPinned: false, createdAt: refDate)
+        let pinned = ClipboardEntry(kind: .url, textContent: "https://example.com", isPinned: true, createdAt: refDate.addingTimeInterval(-100))
+        let newer = ClipboardEntry(kind: .code, textContent: "let alpha = 1", isPinned: false, createdAt: refDate.addingTimeInterval(60))
+
+        let sortedAll = ClipboardLogic.filterAndSort([older, pinned, newer], query: "")
+        precondition(sortedAll.map(\.id) == [pinned.id, newer.id, older.id], "Pinned must sort first, then newest")
+
+        let filtered = ClipboardLogic.filterAndSort([older, pinned, newer], query: "alpha")
+        precondition(filtered.map(\.id) == [newer.id, older.id], "Search filter mismatch")
     }
 }

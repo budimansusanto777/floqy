@@ -707,6 +707,7 @@ struct HomeTabView: View {
 
 struct FilesTabView: View {
     @ObservedObject var manager: NotchManager
+    @ObservedObject var filesTray: FilesTrayService
 
     var body: some View {
         NotchCard {
@@ -716,9 +717,9 @@ struct FilesTabView: View {
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle(NotchColors.textPrimary)
                     Spacer()
-                    if !manager.droppedFileNames.isEmpty {
+                    if !filesTray.items.isEmpty {
                         Button("Clear All") {
-                            manager.clearDroppedFiles()
+                            filesTray.clearAll()
                         }
                         .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
                         .font(.system(size: 10.5, weight: .medium))
@@ -726,63 +727,154 @@ struct FilesTabView: View {
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
                     }
-                    PhaseBadge(label: "Phase 2")
+                    Button {
+                        let count = filesTray.pickFilesFromPanel()
+                        if count > 0 {
+                            manager.showToast(count == 1 ? "Added 1 file" : "Added \(count) files")
+                        }
+                    } label: {
+                        Label("Add", systemImage: "plus")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(NotchColors.accentPrimary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                    }
+                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
                 }
 
-                if manager.droppedFileNames.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
+                if filesTray.items.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text("Tray is empty.")
                             .font(.system(size: 11.5, weight: .medium))
                             .foregroundStyle(NotchColors.textPrimary)
-                        Text("Drag any file from Finder onto the notch to stage it here. Native AirDrop, compression, and OCR arrive in Phase 2.")
-                            .font(.system(size: 11.5))
+                        Text("Drag files from Finder onto the notch or click + Add for AirDrop, compression, OCR, and drag-out.")
+                            .font(.system(size: 11))
                             .foregroundStyle(NotchColors.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else {
+                    let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 3)
                     ScrollView {
-                        VStack(spacing: 5) {
-                            ForEach(Array(manager.droppedFileNames.enumerated()), id: \.offset) { index, name in
-                                HStack {
-                                    Image(systemName: "doc")
-                                        .font(.system(size: 10.5))
-                                        .foregroundStyle(NotchColors.accentPrimary)
-                                    Text(name)
-                                        .font(.system(size: 11.5, weight: .medium))
-                                        .foregroundStyle(NotchColors.textPrimary)
-                                        .lineLimit(1)
-                                    Spacer()
-                                    Button {
-                                        manager.removeDroppedFile(at: index)
-                                    } label: {
-                                        Image(systemName: "xmark")
-                                            .font(.system(size: 9.5, weight: .semibold))
-                                            .foregroundStyle(NotchColors.textSecondary)
-                                            .frame(width: 18, height: 18)
-                                    }
-                                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
-                                    .accessibilityLabel("Remove \(name)")
-                                }
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 7)
-                                        .fill(Color.white.opacity(0.05))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 7)
-                                                .stroke(NotchColors.cardBorder, lineWidth: 1)
-                                        )
-                                )
+                        LazyVGrid(columns: columns, spacing: 6) {
+                            ForEach(filesTray.items) { item in
+                                fileTile(item)
                             }
                         }
                     }
 
-                    Text("AirDrop, WebP compression, and offline OCR actions unlock in Phase 2.")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(NotchColors.textSecondary)
+                    if let selected = filesTray.selectedItem {
+                        HStack(spacing: 6) {
+                            Text(selected.name)
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(NotchColors.textSecondary)
+                                .lineLimit(1)
+
+                            Spacer(minLength: 4)
+
+                            if filesTray.isProcessing {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+
+                            Button("AirDrop") {
+                                manager.showToast(filesTray.shareViaAirDrop(selected))
+                            }
+                            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(NotchColors.accentPrimary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+
+                            Button("Compress") {
+                                Task {
+                                    let message = await filesTray.compress(selected)
+                                    manager.showToast(message)
+                                }
+                            }
+                            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(selected.supportsCompression ? NotchColors.textPrimary : NotchColors.textSecondary.opacity(0.5))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .disabled(!selected.supportsCompression || filesTray.isProcessing)
+
+                            Button("OCR") {
+                                Task {
+                                    let result = await filesTray.extractOCRText(selected)
+                                    switch result {
+                                    case .success:
+                                        manager.showToast("OCR text copied to clipboard")
+                                    case .failure(let error):
+                                        manager.showToast(error.localizedDescription)
+                                    }
+                                }
+                            }
+                            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(selected.supportsOCR ? NotchColors.textPrimary : NotchColors.textSecondary.opacity(0.5))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .disabled(!selected.supportsOCR || filesTray.isProcessing)
+                        }
+                        .padding(.top, 2)
+                    }
                 }
             }
+        }
+    }
+
+    private func fileTile(_ item: StagedFileItem) -> some View {
+        let isSelected = filesTray.selectedItem?.id == item.id
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Text(item.kind.rawValue)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(NotchColors.notchBackground)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(NotchColors.accentPrimary))
+
+                Spacer(minLength: 2)
+
+                Button {
+                    filesTray.remove(item.id)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundStyle(NotchColors.textSecondary)
+                        .frame(width: 16, height: 16)
+                }
+                .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 4))
+                .accessibilityLabel("Remove \(item.name)")
+            }
+
+            Text(item.name)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(NotchColors.textPrimary)
+                .lineLimit(1)
+
+            Text(item.formattedSize)
+                .font(.system(size: 9.5, design: .monospaced))
+                .foregroundStyle(NotchColors.textSecondary)
+                .lineLimit(1)
+        }
+        .padding(7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isSelected ? Color.white.opacity(0.11) : Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(isSelected ? NotchColors.accentPrimary : NotchColors.cardBorder, lineWidth: 1)
+                )
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 8))
+        .onTapGesture {
+            filesTray.selectedID = item.id
+        }
+        .onDrag {
+            NSItemProvider(object: item.url as NSURL)
         }
     }
 }
@@ -791,7 +883,13 @@ struct FilesTabView: View {
 
 struct NotesTabView: View {
     @ObservedObject var manager: NotchManager
+    @ObservedObject var obsidian: ObsidianService
     @ObservedObject var productivity: ProductivityService
+
+    @State private var noteDraft = ""
+    @State private var selectedTags: [String] = []
+    @State private var isEditingNote = false
+    @FocusState private var isNoteFieldFocused: Bool
 
     @State private var isAddingTodo = false
     @State private var newTodoText = ""
@@ -802,158 +900,12 @@ struct NotesTabView: View {
     @State private var dragBaseMinutes: Int?
     @FocusState private var isTimerFieldFocused: Bool
 
+    private let quickTags = ["#floqy", "#idea", "#dev"]
+
     var body: some View {
         HStack(spacing: 10) {
-            NotchCard {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Label("Obsidian Quick Note", systemImage: "note.text")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(NotchColors.textPrimary)
-                        Spacer()
-                        PhaseBadge(label: "Phase 2")
-                    }
-                    Text("Append quick thoughts and tags straight into your security-scoped Obsidian Vault.")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(NotchColors.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                }
-            }
-
-            NotchCard {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 6) {
-                        timerDisplayControl
-
-                        Spacer()
-
-                        Button(productivity.pomodoro.isRunning ? "Pause" : "Start") {
-                            if isEditingTimer {
-                                commitTimerEdit()
-                            }
-                            productivity.togglePomodoro()
-                        }
-                        .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundStyle(NotchColors.statusAlert)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-
-                        Button {
-                            if isEditingTimer {
-                                cancelTimerEdit()
-                            }
-                            productivity.resetPomodoro()
-                        } label: {
-                            Image(systemName: "arrow.counterclockwise")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(NotchColors.textSecondary)
-                                .frame(width: 22, height: 22)
-                        }
-                        .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
-                        .accessibilityLabel("Reset Focus Timer")
-                    }
-
-                    Divider().overlay(NotchColors.cardBorder)
-
-                    if productivity.todos.isEmpty {
-                        Text("No tasks yet.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(NotchColors.textSecondary)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                    } else {
-                        ScrollView {
-                            VStack(spacing: 4) {
-                                ForEach(productivity.todos) { item in
-                                    HStack(spacing: 6) {
-                                        Button {
-                                            productivity.toggleTodo(id: item.id)
-                                        } label: {
-                                            Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
-                                                .font(.system(size: 12))
-                                                .foregroundStyle(
-                                                    item.isDone ? NotchColors.statusHealthy : NotchColors.textSecondary
-                                                )
-                                        }
-                                        .buttonStyle(.plain)
-                                        .accessibilityLabel(item.isDone ? "Mark \(item.title) incomplete" : "Mark \(item.title) complete")
-
-                                        Text(item.title)
-                                            .font(.system(size: 11))
-                                            .strikethrough(item.isDone)
-                                            .foregroundStyle(item.isDone ? NotchColors.textSecondary : NotchColors.textPrimary)
-                                            .lineLimit(1)
-
-                                        Spacer(minLength: 2)
-
-                                        Button {
-                                            productivity.deleteTodo(id: item.id)
-                                        } label: {
-                                            Image(systemName: "xmark")
-                                                .font(.system(size: 9, weight: .semibold))
-                                                .foregroundStyle(NotchColors.textSecondary)
-                                                .frame(width: 16, height: 16)
-                                        }
-                                        .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 4))
-                                        .accessibilityLabel("Delete \(item.title)")
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if isAddingTodo {
-                        HStack(spacing: 5) {
-                            TextField("New task…", text: $newTodoText)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 11))
-                                .foregroundStyle(NotchColors.textPrimary)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 4)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .fill(Color.white.opacity(0.06))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 6)
-                                                .stroke(NotchColors.accentPrimary, lineWidth: 1)
-                                        )
-                                )
-                                .focused($isTodoFieldFocused)
-                                .onSubmit {
-                                    commitNewTodo()
-                                }
-
-                            Button {
-                                cancelNewTodo()
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(NotchColors.textSecondary)
-                                    .frame(width: 22, height: 22)
-                            }
-                            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
-                            .accessibilityLabel("Cancel new task")
-                        }
-                    } else {
-                        Button {
-                            if isEditingTimer {
-                                cancelTimerEdit()
-                            }
-                            isAddingTodo = true
-                            manager.beginTextInput()
-                            isTodoFieldFocused = true
-                        } label: {
-                            Label("Add todo", systemImage: "plus")
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(NotchColors.accentPrimary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                        }
-                        .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
-                    }
-                }
-            }
+            obsidianCard
+            focusAndTodoCard
         }
         .onDisappear {
             if isAddingTodo {
@@ -961,6 +913,314 @@ struct NotesTabView: View {
             }
             if isEditingTimer {
                 cancelTimerEdit()
+            }
+            if isEditingNote {
+                endNoteEdit()
+            }
+        }
+    }
+
+    private var obsidianCard: some View {
+        NotchCard {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 5) {
+                    Label(obsidian.storageLabel, systemImage: "note.text")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(NotchColors.textPrimary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 4)
+
+                    Menu {
+                        ForEach(ObsidianNoteTarget.allCases) { target in
+                            Button(target.rawValue) {
+                                obsidian.target = target
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text(obsidian.target.rawValue)
+                                .font(.system(size: 10, weight: .medium))
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .semibold))
+                        }
+                        .foregroundStyle(NotchColors.textSecondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.white.opacity(0.06))
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(NotchColors.cardBorder, lineWidth: 1))
+                        )
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+
+                    Menu {
+                        Button("Open Folder") {
+                            obsidian.openActiveNotesFolder()
+                        }
+                        Button("Choose Folder…") {
+                            if isEditingNote {
+                                endNoteEdit()
+                            }
+                            obsidian.chooseVaultFolder()
+                        }
+                        if obsidian.isVaultConfigured {
+                            Divider()
+                            Button("Use Default Folder") {
+                                obsidian.disconnectVault()
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "folder")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(NotchColors.textSecondary)
+                            .frame(width: 22, height: 22)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color.white.opacity(0.06))
+                                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(NotchColors.cardBorder, lineWidth: 1))
+                            )
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .accessibilityLabel("Notes folder options")
+                    .help("Notes folder: \(obsidian.storageLabel)")
+                }
+
+                if isEditingNote {
+                    TextField("Write a quick note…", text: $noteDraft)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11))
+                        .foregroundStyle(NotchColors.textPrimary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.white.opacity(0.06))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(NotchColors.accentPrimary, lineWidth: 1)
+                                )
+                        )
+                        .focused($isNoteFieldFocused)
+                        .onSubmit {
+                            appendObsidianNote()
+                        }
+                        .onKeyPress(.escape) {
+                            endNoteEdit()
+                            return .handled
+                        }
+                } else {
+                    Button {
+                        beginNoteEdit()
+                    } label: {
+                        Text(noteDraft.isEmpty ? "Click to write a note for \(obsidian.target.rawValue)…" : noteDraft)
+                            .font(.system(size: 11))
+                            .foregroundStyle(noteDraft.isEmpty ? NotchColors.textSecondary : NotchColors.textPrimary)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .padding(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.white.opacity(0.04))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(NotchColors.cardBorder, lineWidth: 1)
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                HStack(spacing: 4) {
+                    ForEach(quickTags, id: \.self) { tag in
+                        let isActive = selectedTags.contains(tag)
+                        Button(tag) {
+                            toggleTag(tag)
+                        }
+                        .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5, isSelected: isActive))
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(isActive ? NotchColors.textPrimary : NotchColors.textSecondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                    }
+
+                    Spacer(minLength: 4)
+
+                    Button("Save") {
+                        appendObsidianNote()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(NotchColors.notchBackground)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(NotchColors.accentPrimary))
+                }
+
+                if let error = obsidian.lastError {
+                    Text(error)
+                        .font(.system(size: 10))
+                        .foregroundStyle(NotchColors.statusAlert)
+                        .lineLimit(1)
+                } else if let saved = obsidian.lastSavedSummary {
+                    Text(saved)
+                        .font(.system(size: 10))
+                        .foregroundStyle(NotchColors.statusHealthy)
+                        .lineLimit(1)
+                } else if let latest = obsidian.recentNotes.first {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(latest, forType: .string)
+                        manager.showToast("Copied latest note")
+                    } label: {
+                        Text(latest)
+                            .font(.system(size: 10))
+                            .foregroundStyle(NotchColors.textSecondary)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Click to copy latest note")
+                }
+            }
+        }
+    }
+
+    private var focusAndTodoCard: some View {
+        NotchCard {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    timerDisplayControl
+
+                    Spacer()
+
+                    Button(productivity.pomodoro.isRunning ? "Pause" : "Start") {
+                        if isEditingTimer {
+                            commitTimerEdit()
+                        }
+                        productivity.togglePomodoro()
+                    }
+                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(NotchColors.statusAlert)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+
+                    Button {
+                        if isEditingTimer {
+                            cancelTimerEdit()
+                        }
+                        productivity.resetPomodoro()
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(NotchColors.textSecondary)
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                    .accessibilityLabel("Reset Focus Timer")
+                }
+
+                Divider().overlay(NotchColors.cardBorder)
+
+                if productivity.todos.isEmpty {
+                    Text("No tasks yet.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(NotchColors.textSecondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 4) {
+                            ForEach(productivity.todos) { item in
+                                HStack(spacing: 6) {
+                                    Button {
+                                        productivity.toggleTodo(id: item.id)
+                                    } label: {
+                                        Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(
+                                                item.isDone ? NotchColors.statusHealthy : NotchColors.textSecondary
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(item.isDone ? "Mark \(item.title) incomplete" : "Mark \(item.title) complete")
+
+                                    Text(item.title)
+                                        .font(.system(size: 11))
+                                        .strikethrough(item.isDone)
+                                        .foregroundStyle(item.isDone ? NotchColors.textSecondary : NotchColors.textPrimary)
+                                        .lineLimit(1)
+
+                                    Spacer(minLength: 2)
+
+                                    Button {
+                                        productivity.deleteTodo(id: item.id)
+                                    } label: {
+                                        Image(systemName: "xmark")
+                                            .font(.system(size: 9, weight: .semibold))
+                                            .foregroundStyle(NotchColors.textSecondary)
+                                            .frame(width: 16, height: 16)
+                                    }
+                                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 4))
+                                    .accessibilityLabel("Delete \(item.title)")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if isAddingTodo {
+                    HStack(spacing: 5) {
+                        TextField("New task…", text: $newTodoText)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 11))
+                            .foregroundStyle(NotchColors.textPrimary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color.white.opacity(0.06))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .stroke(NotchColors.accentPrimary, lineWidth: 1)
+                                    )
+                            )
+                            .focused($isTodoFieldFocused)
+                            .onSubmit {
+                                commitNewTodo()
+                            }
+
+                        Button {
+                            cancelNewTodo()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(NotchColors.textSecondary)
+                                .frame(width: 22, height: 22)
+                        }
+                        .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                        .accessibilityLabel("Cancel new task")
+                    }
+                } else {
+                    Button {
+                        if isEditingTimer { cancelTimerEdit() }
+                        if isEditingNote { endNoteEdit() }
+                        isAddingTodo = true
+                        manager.beginTextInput()
+                        isTodoFieldFocused = true
+                    } label: {
+                        Label("Add todo", systemImage: "plus")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(NotchColors.accentPrimary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                    }
+                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                }
             }
         }
     }
@@ -1031,10 +1291,40 @@ struct NotesTabView: View {
         }
     }
 
-    private func startTimerEdit() {
-        if isAddingTodo {
-            cancelNewTodo()
+    private func beginNoteEdit() {
+        if isAddingTodo { cancelNewTodo() }
+        if isEditingTimer { cancelTimerEdit() }
+        isEditingNote = true
+        manager.beginTextInput()
+        isNoteFieldFocused = true
+    }
+
+    private func endNoteEdit() {
+        isEditingNote = false
+        isNoteFieldFocused = false
+        manager.endTextInput()
+    }
+
+    private func toggleTag(_ tag: String) {
+        if let index = selectedTags.firstIndex(of: tag) {
+            selectedTags.remove(at: index)
+        } else {
+            selectedTags.append(tag)
         }
+    }
+
+    private func appendObsidianNote() {
+        if obsidian.appendNote(body: noteDraft, tags: selectedTags) {
+            noteDraft = ""
+            selectedTags.removeAll()
+            endNoteEdit()
+            manager.showToast("Saved to Obsidian")
+        }
+    }
+
+    private func startTimerEdit() {
+        if isAddingTodo { cancelNewTodo() }
+        if isEditingNote { endNoteEdit() }
         timerMinutesDraft = "\(productivity.pomodoro.durationMinutes)"
         isEditingTimer = true
         manager.beginTextInput()
@@ -1077,27 +1367,196 @@ struct NotesTabView: View {
 
 struct ClipboardTabView: View {
     @ObservedObject var manager: NotchManager
+    @ObservedObject var clipboard: ClipboardService
+
+    @State private var isSearching = false
+    @FocusState private var isSearchFieldFocused: Bool
 
     var body: some View {
         NotchCard {
             VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Label("Copy Windows — Clipboard History", systemImage: "doc.on.clipboard")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundStyle(NotchColors.textPrimary)
-                    Spacer()
+                HStack(spacing: 6) {
+                    if isSearching || !clipboard.searchQuery.isEmpty {
+                        HStack(spacing: 5) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(NotchColors.textSecondary)
+
+                            TextField("Search clipboard…", text: $clipboard.searchQuery)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 11))
+                                .foregroundStyle(NotchColors.textPrimary)
+                                .focused($isSearchFieldFocused)
+                                .onKeyPress(.escape) {
+                                    stopSearch(clearQuery: true)
+                                    return .handled
+                                }
+
+                            Button {
+                                stopSearch(clearQuery: true)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(NotchColors.textSecondary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Clear search")
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7)
+                                .fill(Color.white.opacity(0.06))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 7)
+                                        .stroke(isSearching ? NotchColors.accentPrimary : NotchColors.cardBorder, lineWidth: 1)
+                                )
+                        )
+                    } else {
+                        Button {
+                            startSearch()
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.system(size: 10.5))
+                                Text("Search clipboard…")
+                                    .font(.system(size: 11))
+                            }
+                            .foregroundStyle(NotchColors.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7)
+                                    .fill(Color.white.opacity(0.04))
+                                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(NotchColors.cardBorder, lineWidth: 1))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
                     Text("⌘⇧V")
-                        .font(.system(size: 10.5, design: .monospaced))
+                        .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(NotchColors.textSecondary)
-                    PhaseBadge(label: "Phase 2")
+
+                    if clipboard.hasUnpinnedEntries {
+                        Button("Clear") {
+                            clipboard.clearUnpinned()
+                        }
+                        .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(NotchColors.textSecondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                    }
                 }
-                Text("Lightweight NSPasteboard watcher with auto-type badges (Code, URL, Text, Image), search, pinning, and 1-click AI explanation.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(NotchColors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
+
+                let visibleEntries = clipboard.filteredEntries
+                if visibleEntries.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(clipboard.entries.isEmpty ? "Clipboard history is empty." : "No matching items.")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(NotchColors.textPrimary)
+                        Text(clipboard.entries.isEmpty ? "Copy text, code, links, or images anywhere on your Mac to capture them here." : "Try a different search term.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(NotchColors.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 5) {
+                            ForEach(visibleEntries) { entry in
+                                clipboardRow(entry)
+                            }
+                        }
+                    }
+                }
             }
         }
+        .onDisappear {
+            if isSearching {
+                stopSearch(clearQuery: false)
+            }
+        }
+    }
+
+    private func clipboardRow(_ entry: ClipboardEntry) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                clipboard.copyToPasteboard(entry)
+                manager.showToast("Copied to clipboard")
+            } label: {
+                HStack(spacing: 7) {
+                    Text(entry.kind.rawValue)
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(NotchColors.notchBackground)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(NotchColors.accentPrimary))
+
+                    if let data = entry.imageData, let nsImage = NSImage(data: data) {
+                        Image(nsImage: nsImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 20, height: 20)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+
+                    Text(entry.textContent.replacingOccurrences(of: "\n", with: " "))
+                        .font(.system(size: 11, design: entry.kind == .code ? .monospaced : .default))
+                        .foregroundStyle(NotchColors.textPrimary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 4)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                clipboard.togglePin(entry.id)
+            } label: {
+                Image(systemName: entry.isPinned ? "star.fill" : "star")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(entry.isPinned ? NotchColors.statusWarning : NotchColors.textSecondary)
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
+            .accessibilityLabel(entry.isPinned ? "Unpin clipboard item" : "Pin clipboard item")
+
+            Button {
+                clipboard.delete(entry.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(NotchColors.textSecondary)
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
+            .accessibilityLabel("Delete clipboard item")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.white.opacity(0.04))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(NotchColors.cardBorder, lineWidth: 1))
+        )
+    }
+
+    private func startSearch() {
+        isSearching = true
+        manager.beginTextInput()
+        isSearchFieldFocused = true
+    }
+
+    private func stopSearch(clearQuery: Bool) {
+        if clearQuery {
+            clipboard.searchQuery = ""
+        }
+        isSearching = false
+        isSearchFieldFocused = false
+        manager.endTextInput()
     }
 }
 

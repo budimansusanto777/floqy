@@ -3,6 +3,12 @@ import SwiftUI
 /// Full expanded notch hub with camera-safe header and 6 symmetrical tabs below the hardware notch.
 struct NotchExpandedView: View {
     @ObservedObject var manager: NotchManager
+    @ObservedObject private var filesTray: FilesTrayService
+
+    init(manager: NotchManager) {
+        self.manager = manager
+        self.filesTray = manager.filesTray
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -133,8 +139,8 @@ struct NotchExpandedView: View {
             HStack(spacing: 4) {
                 Text(tab.title)
                     .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
-                if tab == .files && !manager.droppedFileNames.isEmpty {
-                    Text("\(manager.droppedFileNames.count)")
+                if tab == .files && !filesTray.items.isEmpty {
+                    Text("\(filesTray.items.count)")
                         .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
                         .foregroundStyle(NotchColors.notchBackground)
                         .padding(.horizontal, 4)
@@ -163,14 +169,21 @@ struct NotchExpandedView: View {
                 productivity: manager.productivity
             )
         case .files:
-            FilesTabView(manager: manager)
+            FilesTabView(
+                manager: manager,
+                filesTray: manager.filesTray
+            )
         case .notes:
             NotesTabView(
                 manager: manager,
+                obsidian: manager.obsidian,
                 productivity: manager.productivity
             )
         case .clipboard:
-            ClipboardTabView(manager: manager)
+            ClipboardTabView(
+                manager: manager,
+                clipboard: manager.clipboard
+            )
         case .ai:
             AITabView(manager: manager)
         case .system:

@@ -1,15 +1,17 @@
 import EventKit
 import SwiftUI
 
-/// Settings window for notch behavior, EventKit calendar sync, focus timer, and hardware diagnostics.
+/// Settings window for notch behavior, EventKit calendar sync, Obsidian vault, focus timer, and hardware diagnostics.
 struct SettingsView: View {
     @ObservedObject var manager: NotchManager
     @ObservedObject private var calendar: CalendarService
+    @ObservedObject private var obsidian: ObsidianService
     @ObservedObject private var productivity: ProductivityService
 
     init(manager: NotchManager) {
         self.manager = manager
         self.calendar = manager.calendar
+        self.obsidian = manager.obsidian
         self.productivity = manager.productivity
     }
 
@@ -18,8 +20,16 @@ struct SettingsView: View {
             Section("Notch Behavior") {
                 Toggle("Auto-expand on hover", isOn: $manager.hoverToExpandEnabled)
 
-                LabeledContent("Global Shortcut") {
+                LabeledContent("Toggle Notch") {
                     Text("⌘ ⇧ Space")
+                        .font(.system(.body, design: .monospaced))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 5).fill(.quaternary))
+                }
+
+                LabeledContent("Copy History") {
+                    Text("⌘ ⇧ V")
                         .font(.system(.body, design: .monospaced))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 2)
@@ -61,6 +71,31 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Quick Notes") {
+                HStack {
+                    LabeledContent("Notes Folder") {
+                        Text(obsidian.vaultName ?? "Local (Default)")
+                            .foregroundStyle(obsidian.isVaultConfigured ? .green : .secondary)
+                    }
+                    Spacer()
+                    Button(obsidian.isVaultConfigured ? "Change…" : "Choose Folder…") {
+                        obsidian.chooseVaultFolder()
+                    }
+                    if obsidian.isVaultConfigured {
+                        Button("Use Default", role: .destructive) {
+                            obsidian.disconnectVault()
+                        }
+                    }
+                    Button("Open Folder") {
+                        obsidian.openActiveNotesFolder()
+                    }
+                }
+
+                Text("Saves Markdown notes locally by default, or to any custom folder (including an Obsidian Vault).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Focus Timer") {
                 Stepper(
                     value: Binding(
@@ -89,13 +124,13 @@ struct SettingsView: View {
             }
 
             Section("About Floqy") {
-                LabeledContent("Version", value: "0.1.0 (Phase 1)")
+                LabeledContent("Version", value: "0.2.0 (Phase 2)")
                 LabeledContent("License", value: "GNU GPLv3")
                 LabeledContent("Copyright", value: "© 2026 budimansusanto777")
             }
         }
         .formStyle(.grouped)
-        .frame(width: 440, height: 390)
+        .frame(width: 440, height: 470)
     }
 
     private var eventKitStatusLabel: String {

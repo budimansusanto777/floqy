@@ -35,14 +35,17 @@ final class NotchPanel: NSPanel {
     }
 }
 
-/// Forwards mouse events and hover tracking strictly within the active notch silhouette so clicks
-/// and pointer movement outside the visible notch never trigger Floqy or steal focus.
+/// Forwards mouse events, hover tracking, and Finder file drops strictly within the active notch
+/// silhouette so clicks outside the visible notch never trigger Floqy or steal focus.
 final class NotchPassthroughContainerView<Content: View>: NSView {
     private let hostingView: NSHostingView<Content>
     private var hoverTrackingArea: NSTrackingArea?
 
     var activeHitRectProvider: (CGSize) -> CGRect
     var onHoverChanged: ((Bool) -> Void)?
+    var onDragEntered: (() -> Void)?
+    var onDragExited: (() -> Void)?
+    var onFilesDropped: (([URL]) -> Void)?
 
     init(rootView: Content, frame: CGRect, activeHitRectProvider: @escaping (CGSize) -> CGRect) {
         self.hostingView = NSHostingView(rootView: rootView)
@@ -51,6 +54,7 @@ final class NotchPassthroughContainerView<Content: View>: NSView {
 
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+        registerForDraggedTypes([.fileURL])
 
         hostingView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(hostingView)
@@ -109,5 +113,46 @@ final class NotchPassthroughContainerView<Content: View>: NSView {
             return nil
         }
         return super.hitTest(point)
+    }
+
+    // MARK: - NSDraggingDestination
+
+    private var fileURLReadOptions: [NSPasteboard.ReadingOptionKey: Any] {
+        [.urlReadingFileURLsOnly: true]
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: fileURLReadOptions) else {
+            return []
+        }
+        onDragEntered?()
+        return .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: fileURLReadOptions) else {
+            return []
+        }
+        return .copy
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        onDragExited?()
+    }
+
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        onDragExited?()
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        defer { onDragExited?() }
+        guard let urls = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: fileURLReadOptions
+        ) as? [URL], !urls.isEmpty else {
+            return false
+        }
+        onFilesDropped?(urls)
+        return true
     }
 }

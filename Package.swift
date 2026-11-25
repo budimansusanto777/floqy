@@ -23,7 +23,11 @@ let package = Package(
                 .linkedFramework("SwiftUI"),
                 .linkedFramework("QuartzCore"),
                 .linkedFramework("Carbon"),
-                .linkedFramework("EventKit")
+                .linkedFramework("EventKit"),
+                .linkedFramework("Vision"),
+                .linkedFramework("PDFKit"),
+                .linkedFramework("ImageIO"),
+                .linkedFramework("UniformTypeIdentifiers")
             ]
         )
     ]

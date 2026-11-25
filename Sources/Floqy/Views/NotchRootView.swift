@@ -1,11 +1,9 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// Root SwiftUI container hosted inside NotchPanel, rendering the hardware-matched shell and state views.
 struct NotchRootView: View {
     @ObservedObject var manager: NotchManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isDragTargeted = false
 
     private var shellSize: CGSize {
         manager.geometry.shellSize(
@@ -46,10 +44,10 @@ struct NotchRootView: View {
                     bottomCornerRadius: bottomRadius
                 )
                 .stroke(
-                    isDragTargeted
+                    manager.isDragTargeted
                         ? NotchColors.accentPrimary
                         : Color.white.opacity(manager.mode == .idle ? 0.0 : 0.12),
-                    lineWidth: isDragTargeted ? 1.5 : 1
+                    lineWidth: manager.isDragTargeted ? 1.5 : 1
                 )
             )
             .shadow(
@@ -85,30 +83,9 @@ struct NotchRootView: View {
         }
         .frame(width: totalWidth, height: shellSize.height, alignment: .top)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onDrop(of: [.fileURL], isTargeted: $isDragTargeted) { providers in
-            handleFileDrop(providers: providers)
-        }
         .animation(transitionAnimation, value: manager.mode)
         .animation(transitionAnimation, value: manager.homeSubView)
         .animation(transitionAnimation, value: manager.activeTab)
         .preferredColorScheme(.dark)
-    }
-
-    private func handleFileDrop(providers: [NSItemProvider]) -> Bool {
-        let matching = providers.filter {
-            $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
-        }
-        guard !matching.isEmpty else { return false }
-
-        for provider in matching {
-            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                guard let data = item as? Data,
-                      let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
-                Task { @MainActor in
-                    manager.addDroppedFiles([url])
-                }
-            }
-        }
-        return true
     }
 }
