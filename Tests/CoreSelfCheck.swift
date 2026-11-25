@@ -13,7 +13,8 @@ enum CoreSelfCheck {
         checkDailyFlowLogic()
         checkMonthGridLogic()
         checkProductivityToolsLogic()
-        print("CoreSelfCheck: 9/9 checks passed.")
+        checkNotchEnhancementsLogic()
+        print("CoreSelfCheck: 10/10 checks passed.")
     }
 
     private static func checkNotchedScreenDetection() {
@@ -239,5 +240,106 @@ enum CoreSelfCheck {
 
         let filtered = ClipboardLogic.filterAndSort([older, pinned, newer], query: "alpha")
         precondition(filtered.map(\.id) == [newer.id, older.id], "Search filter mismatch")
+    }
+
+    private static func checkNotchEnhancementsLogic() {
+        let geometry = NotchGeometry(screen: nil)
+        let alert = NotchAlert.pomodoroComplete(durationMinutes: 25)
+        let compactSize = geometry.shellSize(for: .compact(.pomodoro))
+        let alertSize = geometry.shellSize(for: .alert(alert))
+        let alertFrame = geometry.panelFrame(for: .alert(alert))
+        let alertHit = geometry.hitRectInPanel(for: .alert(alert))
+        precondition(alertSize.height > compactSize.height, "Alert shell must expand vertically beyond compact height")
+        precondition(CGRect(origin: .zero, size: alertFrame.size).contains(alertHit), "Alert hit rect must fit inside alert panel")
+
+        var shape = NotchShellShape(topEarRadius: 12, bottomCornerRadius: 22)
+        shape.animatableData = .init(6, 18)
+        precondition(shape.topEarRadius == 6 && shape.bottomCornerRadius == 18, "NotchShellShape AnimatablePair mismatch")
+        let clampedPath = NotchShellShape(topEarRadius: -2, bottomCornerRadius: -4).path(in: CGRect(x: 0, y: 0, width: 200, height: 38))
+        precondition(!clampedPath.isEmpty, "NotchShellShape must clamp negative radii safely")
+
+        var pomo = PomodoroState(durationMinutes: 2)
+        precondition(!pomo.isPaused && pomo.remainingProgress == 1.0, "Fresh Pomodoro must not report paused")
+        pomo.toggleForCheck()
+        _ = pomo.tick()
+        pomo.isRunning = false
+        precondition(pomo.isPaused, "Stopped mid-session Pomodoro must report paused")
+        precondition(pomo.remainingProgress > 0.9 && pomo.remainingProgress < 1.0, "Remaining progress mismatch")
+
+        let teamsMeet = CalendarLogic.extractMeetingURL(from: ["https://teams.microsoft.com/meet/123456"])
+        precondition(teamsMeet != nil && CalendarLogic.meetingProvider(for: teamsMeet!) == "Teams", "Teams /meet/ URL parsing failed")
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let end = now.addingTimeInterval(3600)
+        precondition(CalendarLogic.meetingAlertStage(now: now, startDate: now.addingTimeInterval(360), endDate: end) == nil, "6m ahead must not trigger")
+        precondition(CalendarLogic.meetingAlertStage(now: now, startDate: now.addingTimeInterval(250), endDate: end) == .headsUp(minutesRemaining: 5), "5m heads-up mismatch")
+        precondition(CalendarLogic.meetingAlertStage(now: now, startDate: now.addingTimeInterval(-30), endDate: end) == .startingNow, "Starting now mismatch")
+        precondition(CalendarLogic.meetingAlertStage(now: now, startDate: now.addingTimeInterval(-180), endDate: end) == nil, "After 2m start window must stop triggering")
+
+        let resolvedAlert = NotchMode.resolvedCollapsedMode(
+            activeAlert: alert,
+            hasMeetingHeadsUp: true,
+            pomodoroRunning: true,
+            pomodoroPaused: false,
+            showPausedPomodoroInNotch: true,
+            isMusicPlaying: true
+        )
+        precondition(resolvedAlert == .alert(alert), "Alert must win highest priority")
+
+        let resolvedHeadsUp = NotchMode.resolvedCollapsedMode(
+            activeAlert: nil,
+            hasMeetingHeadsUp: true,
+            pomodoroRunning: true,
+            pomodoroPaused: false,
+            showPausedPomodoroInNotch: true,
+            isMusicPlaying: true
+        )
+        precondition(resolvedHeadsUp == .compact(.meeting), "Meeting heads-up must precede Pomodoro")
+
+        let resolvedRunningWinsMusic = NotchMode.resolvedCollapsedMode(
+            activeAlert: nil,
+            hasMeetingHeadsUp: false,
+            pomodoroRunning: true,
+            pomodoroPaused: false,
+            showPausedPomodoroInNotch: true,
+            isMusicPlaying: true
+        )
+        precondition(resolvedRunningWinsMusic == .compact(.pomodoro), "Running Pomodoro must precede Music")
+
+        let resolvedMusicWinsPaused = NotchMode.resolvedCollapsedMode(
+            activeAlert: nil,
+            hasMeetingHeadsUp: false,
+            pomodoroRunning: false,
+            pomodoroPaused: true,
+            showPausedPomodoroInNotch: true,
+            isMusicPlaying: true
+        )
+        precondition(resolvedMusicWinsPaused == .compact(.music), "Playing Music must precede paused Pomodoro")
+
+        let resolvedPausedShown = NotchMode.resolvedCollapsedMode(
+            activeAlert: nil,
+            hasMeetingHeadsUp: false,
+            pomodoroRunning: false,
+            pomodoroPaused: true,
+            showPausedPomodoroInNotch: true,
+            isMusicPlaying: false
+        )
+        precondition(resolvedPausedShown == .compact(.pomodoro), "Paused Pomodoro should show when music is silent and toggle is ON")
+
+        let resolvedPausedHidden = NotchMode.resolvedCollapsedMode(
+            activeAlert: nil,
+            hasMeetingHeadsUp: false,
+            pomodoroRunning: false,
+            pomodoroPaused: true,
+            showPausedPomodoroInNotch: false,
+            isMusicPlaying: false
+        )
+        precondition(resolvedPausedHidden == .idle, "Paused Pomodoro should return Idle when music is silent and toggle is OFF")
+    }
+}
+
+private extension PomodoroState {
+    mutating func toggleForCheck() {
+        isRunning = true
     }
 }

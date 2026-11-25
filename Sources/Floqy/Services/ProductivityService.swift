@@ -10,6 +10,7 @@ final class ProductivityService: ObservableObject {
     @Published private(set) var pomodoro: PomodoroState
 
     var onPomodoroStarted: (() -> Void)?
+    var onPomodoroStateChanged: (() -> Void)?
     var onPomodoroCompleted: (() -> Void)?
 
     private var timer: Timer?
@@ -36,6 +37,7 @@ final class ProductivityService: ObservableObject {
         timer?.invalidate()
         timer = nil
         pomodoro.setDuration(minutes: clamped)
+        onPomodoroStateChanged?()
     }
 
     func togglePomodoro() {
@@ -50,12 +52,14 @@ final class ProductivityService: ObservableObject {
             timer?.invalidate()
             timer = nil
         }
+        onPomodoroStateChanged?()
     }
 
     func resetPomodoro() {
         timer?.invalidate()
         timer = nil
         pomodoro.reset()
+        onPomodoroStateChanged?()
     }
 
     private func startTimer() {

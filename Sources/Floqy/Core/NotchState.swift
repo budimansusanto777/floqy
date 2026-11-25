@@ -1,9 +1,16 @@
 import SwiftUI
 
-/// Represents the three visual states of the Floqy notch window.
+/// Actionable alert pills displayed just below the hardware camera notch.
+enum NotchAlert: Equatable, Hashable {
+    case pomodoroComplete(durationMinutes: Int)
+    case meetingStarting(eventId: String, title: String, provider: String, url: URL)
+}
+
+/// Represents the four visual states of the Floqy notch window.
 enum NotchMode: Equatable, Hashable {
     case idle
     case compact(CompactActivity)
+    case alert(NotchAlert)
     case expanded
 
     var isExpanded: Bool {
@@ -15,11 +22,43 @@ enum NotchMode: Equatable, Hashable {
         if case .compact = self { return true }
         return false
     }
+
+    var isAlert: Bool {
+        if case .alert = self { return true }
+        return false
+    }
+
+    static func resolvedCollapsedMode(
+        activeAlert: NotchAlert?,
+        hasMeetingHeadsUp: Bool,
+        pomodoroRunning: Bool,
+        pomodoroPaused: Bool,
+        showPausedPomodoroInNotch: Bool,
+        isMusicPlaying: Bool
+    ) -> NotchMode {
+        if let activeAlert {
+            return .alert(activeAlert)
+        }
+        if hasMeetingHeadsUp {
+            return .compact(.meeting)
+        }
+        if pomodoroRunning {
+            return .compact(.pomodoro)
+        }
+        if isMusicPlaying {
+            return .compact(.music)
+        }
+        if pomodoroPaused && showPausedPomodoroInNotch {
+            return .compact(.pomodoro)
+        }
+        return .idle
+    }
 }
 
 /// Live activities that can be surfaced in the Compact notch wings.
 enum CompactActivity: String, CaseIterable, Identifiable, Hashable {
     case music
+    case meeting
     case dev
     case pomodoro
     case ai
@@ -30,6 +69,7 @@ enum CompactActivity: String, CaseIterable, Identifiable, Hashable {
     var displayName: String {
         switch self {
         case .music: return "Music"
+        case .meeting: return "Meeting"
         case .dev: return "Dev Build"
         case .pomodoro: return "Pomodoro"
         case .ai: return "AI Agent"

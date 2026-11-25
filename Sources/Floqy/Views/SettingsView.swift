@@ -19,6 +19,7 @@ struct SettingsView: View {
         Form {
             Section("Notch Behavior") {
                 Toggle("Auto-expand on hover", isOn: $manager.hoverToExpandEnabled)
+                Toggle("Notification sounds", isOn: $manager.alertSoundsEnabled)
 
                 LabeledContent("Toggle Notch") {
                     Text("⌘ ⇧ Space")
@@ -109,6 +110,8 @@ struct SettingsView: View {
                             .font(.system(.body, design: .monospaced))
                     }
                 }
+
+                Toggle("Show paused timer in notch", isOn: $manager.showPausedPomodoroInNotch)
             }
 
             Section("Display Geometry") {
@@ -130,7 +133,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 440, height: 470)
+        .frame(width: 440, height: 520)
     }
 
     private var eventKitStatusLabel: String {

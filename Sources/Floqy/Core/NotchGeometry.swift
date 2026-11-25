@@ -61,11 +61,7 @@ struct NotchGeometry: Equatable {
     }
 
     func bottomPadding(for mode: NotchMode) -> CGFloat {
-        switch mode {
-        case .idle: return 0
-        case .compact: return 12
-        case .expanded: return Self.bottomShadowPadding
-        }
+        mode == .idle ? 0 : 2
     }
 
     /// Returns the content shell size (excluding the outer concave ears) for a given notch mode and active sub-view.
@@ -80,13 +76,16 @@ struct NotchGeometry: Equatable {
                 ? hardwareNotchSize
                 : CGSize(width: 196, height: 32)
         case .compact:
-            let compactWidth: CGFloat = hasHardwareNotch
+            let rawWidth: CGFloat = hasHardwareNotch
                 ? max(380, hardwareNotchSize.width + 188)
                 : 360
+            let compactWidth = ceil(rawWidth / 2) * 2
             return CGSize(
                 width: compactWidth,
-                height: max(34, hardwareNotchSize.height)
+                height: hasHardwareNotch ? hardwareNotchSize.height : 34
             )
+        case .alert:
+            return CGSize(width: 416, height: max(82, notchSafeTopHeight + 50))
         case .expanded:
             if activeTab == .home && homeSubView == .calendar {
                 return CGSize(width: 560, height: max(268, notchSafeTopHeight + 234))
@@ -100,7 +99,8 @@ struct NotchGeometry: Equatable {
     func bottomRadius(for mode: NotchMode) -> CGFloat {
         switch mode {
         case .idle: return 16
-        case .compact: return 18
+        case .compact: return 14
+        case .alert: return 22
         case .expanded: return 24
         }
     }

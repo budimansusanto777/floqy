@@ -4,10 +4,27 @@ import SwiftUI
 struct NotchRootView: View {
     @ObservedObject var manager: NotchManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulseActive = false
 
     private var shellSize: CGSize {
         manager.geometry.shellSize(
             for: manager.mode,
+            homeSubView: manager.homeSubView,
+            activeTab: manager.activeTab
+        )
+    }
+
+    private var idleSize: CGSize {
+        manager.geometry.shellSize(for: .idle)
+    }
+
+    private var alertSize: CGSize {
+        manager.geometry.shellSize(for: .alert(.pomodoroComplete(durationMinutes: 25)))
+    }
+
+    private var expandedSize: CGSize {
+        manager.geometry.shellSize(
+            for: .expanded,
             homeSubView: manager.homeSubView,
             activeTab: manager.activeTab
         )
@@ -25,67 +42,129 @@ struct NotchRootView: View {
         manager.geometry.bottomRadius(for: manager.mode)
     }
 
-    private var transitionAnimation: Animation {
-        reduceMotion
-            ? .easeInOut(duration: 0.16)
-            : .spring(response: 0.42, dampingFraction: 0.82)
+    private var isPomodoroCompleteAlert: Bool {
+        if case .alert(.pomodoroComplete) = manager.mode { return true }
+        return false
+    }
+
+    private var borderStrokeColor: Color {
+        if manager.isDragTargeted {
+            return NotchColors.accentPrimary
+        }
+        if isPomodoroCompleteAlert {
+            return NotchColors.statusHealthy.opacity(pulseActive ? 0.95 : 0.45)
+        }
+        if case .alert(.meetingStarting(_, _, let provider, _)) = manager.mode {
+            let accent = provider == "Google Meet" ? NotchColors.statusHealthy : NotchColors.accentPrimary
+            return accent.opacity(0.45)
+        }
+        return Color.white.opacity(manager.mode == .idle ? 0.0 : 0.14)
+    }
+
+    private var contentTransition: AnyTransition {
+        if reduceMotion {
+            return .opacity
+        }
+        return .asymmetric(
+            insertion: .opacity.animation(.easeOut(duration: 0.16).delay(0.05)),
+            removal: .opacity.animation(.easeIn(duration: 0.08))
+        )
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            NotchShellShape(
-                topEarRadius: earRadius,
-                bottomCornerRadius: bottomRadius
-            )
-            .fill(NotchColors.notchBackground)
-            .overlay(
-                NotchShellShape(
-                    topEarRadius: earRadius,
-                    bottomCornerRadius: bottomRadius
-                )
-                .stroke(
-                    manager.isDragTargeted
-                        ? NotchColors.accentPrimary
-                        : Color.white.opacity(manager.mode == .idle ? 0.0 : 0.12),
-                    lineWidth: manager.isDragTargeted ? 1.5 : 1
-                )
-            )
-            .shadow(
-                color: Color.black.opacity(manager.mode == .idle ? 0.0 : 0.55),
-                radius: manager.mode.isExpanded ? 18 : 10,
-                x: 0,
-                y: 8
-            )
-
+        NotchShellShape(
+            topEarRadius: earRadius,
+            bottomCornerRadius: bottomRadius
+        )
+        .fill(NotchColors.notchBackground)
+        .overlay(
             Group {
-                switch manager.mode {
-                case .idle:
-                    NotchIdleView(manager: manager)
-                case .compact(let activity):
-                    NotchCompactView(
-                        manager: manager,
-                        music: manager.music,
-                        productivity: manager.productivity,
-                        activity: activity
+                if isPomodoroCompleteAlert {
+                    NotchShellShape(
+                        topEarRadius: earRadius,
+                        bottomCornerRadius: bottomRadius
                     )
-                case .expanded:
-                    NotchExpandedView(manager: manager)
+                    .stroke(
+                        NotchColors.statusHealthy.opacity(pulseActive ? 0.55 : 0.2),
+                        lineWidth: 6
+                    )
+                    .blur(radius: 4)
                 }
             }
-            .frame(width: shellSize.width, height: shellSize.height)
-            .padding(.horizontal, earRadius)
             .clipShape(
                 NotchShellShape(
                     topEarRadius: earRadius,
                     bottomCornerRadius: bottomRadius
                 )
             )
+        )
+        .overlay(alignment: .top) {
+            // Keep each mode view at its natural fixed frame so collapsing never crushes child layouts.
+            Group {
+                switch manager.mode {
+                case .idle:
+                    NotchIdleView(manager: manager)
+                        .frame(width: idleSize.width, height: idleSize.height)
+                        .transition(.opacity)
+                case .compact(let activity):
+                    let activityCompactSize = manager.geometry.shellSize(for: .compact(activity))
+                    NotchCompactView(
+                        manager: manager,
+                        music: manager.music,
+                        productivity: manager.productivity,
+                        activity: activity
+                    )
+                    .frame(width: activityCompactSize.width, height: activityCompactSize.height)
+                    .compositingGroup()
+                    .transition(contentTransition)
+                case .alert(let alert):
+                    NotchAlertView(manager: manager, alert: alert)
+                        .frame(width: alertSize.width, height: alertSize.height)
+                        .compositingGroup()
+                        .transition(contentTransition)
+                case .expanded:
+                    NotchExpandedView(manager: manager)
+                        .frame(width: expandedSize.width, height: expandedSize.height)
+                        .compositingGroup()
+                        .transition(contentTransition)
+                }
+            }
         }
+        .clipShape(
+            NotchShellShape(
+                topEarRadius: earRadius,
+                bottomCornerRadius: bottomRadius
+            )
+        )
+        .overlay(
+            NotchShellShape(
+                topEarRadius: earRadius,
+                bottomCornerRadius: bottomRadius
+            )
+            .stroke(
+                borderStrokeColor,
+                lineWidth: (manager.isDragTargeted || isPomodoroCompleteAlert) ? 1.5 : 1
+            )
+        )
         .frame(width: totalWidth, height: shellSize.height, alignment: .top)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .animation(transitionAnimation, value: manager.mode)
-        .animation(transitionAnimation, value: manager.homeSubView)
-        .animation(transitionAnimation, value: manager.activeTab)
+        .onChange(of: isPomodoroCompleteAlert) { _, active in
+            triggerGlowPulseIfNeeded(active)
+        }
+        .onAppear {
+            triggerGlowPulseIfNeeded(isPomodoroCompleteAlert)
+        }
         .preferredColorScheme(.dark)
+    }
+
+    private func triggerGlowPulseIfNeeded(_ active: Bool) {
+        guard active, !reduceMotion else {
+            pulseActive = false
+            return
+        }
+        pulseActive = false
+        withAnimation(.easeInOut(duration: 0.55).repeatCount(5, autoreverses: true)) {
+            pulseActive = true
+        }
     }
 }

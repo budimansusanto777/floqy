@@ -5,15 +5,18 @@ struct NotchShellShape: Shape {
     var topEarRadius: CGFloat = NotchGeometry.earWidth
     var bottomCornerRadius: CGFloat
 
-    var animatableData: CGFloat {
-        get { bottomCornerRadius }
-        set { bottomCornerRadius = newValue }
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(topEarRadius, bottomCornerRadius) }
+        set {
+            topEarRadius = newValue.first
+            bottomCornerRadius = newValue.second
+        }
     }
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        let ear = min(topEarRadius, rect.width / 4, rect.height / 2)
-        let bottom = min(bottomCornerRadius, (rect.width - ear * 2) / 2, rect.height - ear)
+        let ear = max(0, min(topEarRadius, rect.width / 4, rect.height / 2))
+        let bottom = max(0, min(bottomCornerRadius, (rect.width - ear * 2) / 2, rect.height - ear))
 
         let leftInnerX = rect.minX + ear
         let rightInnerX = rect.maxX - ear

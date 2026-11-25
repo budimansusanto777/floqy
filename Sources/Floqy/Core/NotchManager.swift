@@ -1,19 +1,41 @@
 import AppKit
 import Carbon.HIToolbox
 import Combine
+import QuartzCore
 import SwiftUI
+
+struct MeetingHeadsUp: Equatable {
+    let event: CalendarEventItem
+    let minutesRemaining: Int
+}
 
 /// Central coordinator for notch state, hover debounce, screen geometry, global hotkeys, and module services.
 @MainActor
 final class NotchManager: ObservableObject {
+    private static let alertSoundsKey = "floqy.notifications.soundsEnabled"
+    private static let showPausedPomodoroKey = "floqy.pomodoro.showPausedInNotch"
+
     @Published var mode: NotchMode = .idle
     @Published var activeTab: NotchTab = .home
     @Published var homeSubView: HomeSubView = .overview
     @Published var compactActivity: CompactActivity = .music
     @Published var hoverToExpandEnabled: Bool = true
+    @Published var alertSoundsEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(alertSoundsEnabled, forKey: Self.alertSoundsKey)
+        }
+    }
+    @Published var showPausedPomodoroInNotch: Bool {
+        didSet {
+            UserDefaults.standard.set(showPausedPomodoroInNotch, forKey: Self.showPausedPomodoroKey)
+            syncCollapsedMode()
+        }
+    }
     @Published var isEditingText: Bool = false
     @Published var isDragTargeted: Bool = false
     @Published var toastMessage: String?
+    @Published private(set) var activeAlert: NotchAlert?
+    @Published private(set) var meetingHeadsUp: MeetingHeadsUp?
     @Published private(set) var geometry: NotchGeometry
 
     let music = MusicService()
@@ -28,6 +50,9 @@ final class NotchManager: ObservableObject {
     private var panelShrinkTask: Task<Void, Never>?
     private var hoverTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
+    private var alertAutoDismissTask: Task<Void, Never>?
+    private var triggeredStartingMeetingIDs: Set<String> = []
+    private(set) var isHoveringCompactControls: Bool = false
     private var cancellables: Set<AnyCancellable> = []
     private var toggleHotKeyRef: EventHotKeyRef?
     private var clipboardHotKeyRef: EventHotKeyRef?
@@ -36,6 +61,8 @@ final class NotchManager: ObservableObject {
     private var lastNonExpandedMode: NotchMode = .idle
 
     init() {
+        self.alertSoundsEnabled = UserDefaults.standard.object(forKey: Self.alertSoundsKey) as? Bool ?? true
+        self.showPausedPomodoroInNotch = UserDefaults.standard.object(forKey: Self.showPausedPomodoroKey) as? Bool ?? true
         self.geometry = NotchGeometry(screen: NotchGeometry.preferredScreen())
     }
 
@@ -64,20 +91,26 @@ final class NotchManager: ObservableObject {
     private func startServices() {
         productivity.onPomodoroStarted = { [weak self] in
             self?.compactActivity = .pomodoro
+            self?.syncCollapsedMode()
+        }
+        productivity.onPomodoroStateChanged = { [weak self] in
+            self?.syncCollapsedMode()
         }
         productivity.onPomodoroCompleted = { [weak self] in
-            self?.showToast("Focus session complete")
+            self?.triggerPomodoroCompletedAlert()
         }
 
         music.$track
             .receive(on: RunLoop.main)
-            .sink { [weak self] track in
-                guard let self else { return }
-                if let track, track.isPlaying, self.mode == .idle {
-                    self.showCompact(.music)
-                } else if track == nil, self.mode == .compact(.music) {
-                    self.setMode(.idle)
-                }
+            .sink { [weak self] _ in
+                self?.syncCollapsedMode()
+            }
+            .store(in: &cancellables)
+
+        Publishers.CombineLatest(calendar.$upcomingEvents, calendar.$now)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _, _ in
+                self?.evaluateMeetingAlerts()
             }
             .store(in: &cancellables)
 
@@ -91,6 +124,9 @@ final class NotchManager: ObservableObject {
     func setMode(_ newMode: NotchMode) {
         hoverTask?.cancel()
 
+        if !newMode.isCompact {
+            isHoveringCompactControls = false
+        }
         if !newMode.isExpanded {
             lastNonExpandedMode = newMode
             if isEditingText {
@@ -137,16 +173,24 @@ final class NotchManager: ObservableObject {
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let targetFrame = geometry.panelFrame(for: targetMode, homeSubView: subView, activeTab: tab)
         let currentFrame = panel?.frame ?? targetFrame
+        let targetArea = targetFrame.width * targetFrame.height
+        let currentArea = currentFrame.width * currentFrame.height
         let isGrowing = targetFrame.width > currentFrame.width || targetFrame.height > currentFrame.height
+        let isExpanding = targetArea >= currentArea
 
         if isGrowing {
-            // Grow the window immediately before animating so SwiftUI never clips during expansion.
-            panel?.setFrame(targetFrame, display: true)
+            // Grow and flush the NSWindow atomically before animating so SwiftUI never clips or teleports sideways.
+            resizePanelAtomically(to: targetFrame)
         }
 
-        let animation: Animation = reduceMotion
-            ? .easeInOut(duration: 0.16)
-            : .spring(response: 0.42, dampingFraction: 0.82)
+        let animation: Animation
+        if reduceMotion {
+            animation = .easeInOut(duration: isExpanding ? 0.16 : 0.14)
+        } else if isExpanding {
+            animation = .spring(response: 0.34, dampingFraction: 0.85)
+        } else {
+            animation = .spring(response: 0.24, dampingFraction: 0.98)
+        }
 
         withAnimation(animation) {
             stateMutation()
@@ -155,8 +199,8 @@ final class NotchManager: ObservableObject {
         updateTrackingRect?()
 
         if !isGrowing && targetFrame != currentFrame {
-            // Shrink the NSWindow after collapse/sub-view shrink completes so idle never covers toolbars.
-            let shrinkDelayNs: UInt64 = reduceMotion ? 170_000_000 : 280_000_000
+            // Wait until the critically damped closing spring completes before shrinking NSWindow.
+            let shrinkDelayNs: UInt64 = reduceMotion ? 180_000_000 : 340_000_000
             panelShrinkTask = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: shrinkDelayNs)
                 guard !Task.isCancelled, let self else { return }
@@ -165,10 +209,21 @@ final class NotchManager: ObservableObject {
                     homeSubView: self.homeSubView,
                     activeTab: self.activeTab
                 )
-                self.panel?.setFrame(finalFrame, display: false)
+                self.resizePanelAtomically(to: finalFrame)
                 self.updateTrackingRect?()
             }
         }
+    }
+
+    private func resizePanelAtomically(to frame: CGRect) {
+        guard let panel else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        panel.setFrame(frame, display: true)
+        panel.contentView?.layoutSubtreeIfNeeded()
+        panel.displayIfNeeded()
+        CATransaction.commit()
+        CATransaction.flush()
     }
 
     func toggleExpanded() {
@@ -183,12 +238,123 @@ final class NotchManager: ObservableObject {
         if isEditingText {
             endTextInput()
         }
+        syncCollapsedMode()
         setMode(lastNonExpandedMode)
     }
 
     func showCompact(_ activity: CompactActivity) {
         compactActivity = activity
         setMode(.compact(activity))
+    }
+
+    // MARK: - Live Activity Priority & Alerts
+
+    func syncCollapsedMode() {
+        let desired = NotchMode.resolvedCollapsedMode(
+            activeAlert: activeAlert,
+            hasMeetingHeadsUp: meetingHeadsUp != nil,
+            pomodoroRunning: productivity.pomodoro.isRunning,
+            pomodoroPaused: productivity.pomodoro.isPaused,
+            showPausedPomodoroInNotch: showPausedPomodoroInNotch,
+            isMusicPlaying: music.track?.isPlaying == true
+        )
+        lastNonExpandedMode = desired
+        if !mode.isExpanded && mode != desired {
+            setMode(desired)
+        }
+    }
+
+    func triggerPomodoroCompletedAlert() {
+        if alertSoundsEnabled {
+            NSSound(named: NSSound.Name("Glass"))?.play()
+        }
+        activeAlert = .pomodoroComplete(durationMinutes: productivity.pomodoro.durationMinutes)
+        scheduleAlertAutoDismiss(after: 9)
+        if mode.isExpanded {
+            showToast("Focus session complete")
+        }
+        syncCollapsedMode()
+    }
+
+    func dismissActiveAlert() {
+        alertAutoDismissTask?.cancel()
+        activeAlert = nil
+        syncCollapsedMode()
+    }
+
+    func restartPomodoroFromAlert() {
+        alertAutoDismissTask?.cancel()
+        activeAlert = nil
+        productivity.resetPomodoro()
+        productivity.togglePomodoro()
+        syncCollapsedMode()
+    }
+
+    func joinMeetingFromAlert(_ url: URL) {
+        calendar.openMeeting(url)
+        dismissActiveAlert()
+    }
+
+    private func evaluateMeetingAlerts() {
+        let currentNow = calendar.now
+        var nextHeadsUp: MeetingHeadsUp?
+
+        for event in calendar.upcomingEvents {
+            guard let meetingURL = event.meetingURL,
+                  let stage = CalendarLogic.meetingAlertStage(
+                      now: currentNow,
+                      startDate: event.startDate,
+                      endDate: event.endDate
+                  ) else {
+                continue
+            }
+
+            switch stage {
+            case .startingNow:
+                if !triggeredStartingMeetingIDs.contains(event.id) {
+                    triggeredStartingMeetingIDs.insert(event.id)
+                    presentMeetingStartingAlert(event: event, url: meetingURL)
+                }
+            case .headsUp(let minutesRemaining):
+                if case .meetingStarting(let activeEventId, _, _, _) = activeAlert, activeEventId == event.id {
+                    continue
+                }
+                if nextHeadsUp == nil {
+                    nextHeadsUp = MeetingHeadsUp(event: event, minutesRemaining: minutesRemaining)
+                }
+            }
+        }
+
+        if meetingHeadsUp != nextHeadsUp {
+            meetingHeadsUp = nextHeadsUp
+            syncCollapsedMode()
+        }
+    }
+
+    private func presentMeetingStartingAlert(event: CalendarEventItem, url: URL) {
+        if alertSoundsEnabled {
+            NSSound(named: NSSound.Name("Ping"))?.play()
+        }
+        activeAlert = .meetingStarting(
+            eventId: event.id,
+            title: event.title,
+            provider: event.meetingProvider ?? "Meeting",
+            url: url
+        )
+        scheduleAlertAutoDismiss(after: 45)
+        if mode.isExpanded {
+            showToast("Starting now: \(event.title)")
+        }
+        syncCollapsedMode()
+    }
+
+    private func scheduleAlertAutoDismiss(after seconds: TimeInterval) {
+        alertAutoDismissTask?.cancel()
+        alertAutoDismissTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            self?.dismissActiveAlert()
+        }
     }
 
     func beginTextInput() {
@@ -219,16 +385,23 @@ final class NotchManager: ObservableObject {
         isDragTargeted = false
     }
 
+    func setHoveringCompactControls(_ hovering: Bool) {
+        isHoveringCompactControls = hovering
+        if hovering {
+            hoverTask?.cancel()
+        }
+    }
+
     func handleHoverChanged(_ hovering: Bool) {
         guard hoverToExpandEnabled else { return }
         hoverTask?.cancel()
 
         if hovering {
-            guard !mode.isExpanded else { return }
+            guard !mode.isExpanded && !mode.isAlert && !isHoveringCompactControls else { return }
             hoverTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(120))
-                guard !Task.isCancelled else { return }
-                self?.setMode(.expanded)
+                guard !Task.isCancelled, let self, !self.isHoveringCompactControls else { return }
+                self.setMode(.expanded)
             }
         } else {
             guard mode.isExpanded, !isEditingText, !isDragTargeted else { return }

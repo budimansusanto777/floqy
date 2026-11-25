@@ -56,6 +56,14 @@ struct PomodoroState: Equatable {
         max(Self.minDurationMinutes, durationSeconds / 60)
     }
 
+    var isPaused: Bool {
+        !isRunning && remainingSeconds > 0 && remainingSeconds < durationSeconds
+    }
+
+    var remainingProgress: Double {
+        min(1.0, max(0.0, Double(remainingSeconds) / Double(max(1, durationSeconds))))
+    }
+
     init(
         remainingSeconds: Int = defaultDuration,
         isRunning: Bool = false,
@@ -111,12 +119,18 @@ struct MonthGridCell: Identifiable, Equatable {
     let dayNumber: Int?
 }
 
+enum MeetingAlertStage: Equatable {
+    case headsUp(minutesRemaining: Int)
+    case startingNow
+}
+
 enum CalendarLogic {
     private static let supportedMeetingHosts: [(prefix: String, provider: String)] = [
         ("meet.google.com/", "Google Meet"),
         ("zoom.us/j/", "Zoom"),
         ("zoom.us/w/", "Zoom"),
         ("teams.microsoft.com/l/meetup-join/", "Teams"),
+        ("teams.microsoft.com/meet/", "Teams"),
         ("teams.live.com/meet/", "Teams")
     ]
 
@@ -142,6 +156,17 @@ enum CalendarLogic {
         let hostAndPath = ((url.host ?? "") + url.path).lowercased()
         for entry in supportedMeetingHosts where hostAndPath.contains(entry.prefix) {
             return entry.provider
+        }
+        return nil
+    }
+
+    static func meetingAlertStage(now: Date, startDate: Date, endDate: Date) -> MeetingAlertStage? {
+        if now >= startDate && now < endDate && now.timeIntervalSince(startDate) <= 120 {
+            return .startingNow
+        }
+        let delta = startDate.timeIntervalSince(now)
+        if delta > 0 && delta <= 300 {
+            return .headsUp(minutesRemaining: max(1, Int(ceil(delta / 60))))
         }
         return nil
     }
