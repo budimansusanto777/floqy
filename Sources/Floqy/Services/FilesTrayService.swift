@@ -28,6 +28,14 @@ final class FilesTrayService: ObservableObject {
     @Published var selectedID: UUID?
     @Published private(set) var isProcessing: Bool = false
 
+    private nonisolated static var trayTempDirectoryURL: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("FloqyTray", isDirectory: true)
+    }
+
+    init() {
+        try? FileManager.default.removeItem(at: Self.trayTempDirectoryURL)
+    }
+
     var selectedItem: StagedFileItem? {
         if let selectedID, let match = items.first(where: { $0.id == selectedID }) {
             return match
@@ -52,6 +60,9 @@ final class FilesTrayService: ObservableObject {
         }
 
         if items.count > 12 {
+            for dropped in items.dropFirst(12) {
+                cleanupManagedTempFile(dropped.url)
+            }
             items = Array(items.prefix(12))
         }
         if let addedID {
@@ -60,6 +71,9 @@ final class FilesTrayService: ObservableObject {
     }
 
     func remove(_ id: UUID) {
+        if let removed = items.first(where: { $0.id == id }) {
+            cleanupManagedTempFile(removed.url)
+        }
         items.removeAll { $0.id == id }
         if selectedID == id {
             selectedID = items.first?.id
@@ -67,11 +81,14 @@ final class FilesTrayService: ObservableObject {
     }
 
     func clearAll() {
+        for item in items {
+            cleanupManagedTempFile(item.url)
+        }
         items.removeAll()
         selectedID = nil
     }
 
-    func pickFilesFromPanel() -> Int {
+    func pickFilesFromPanel(onComplete: @escaping (Int) -> Void) {
         NSApp.activate(ignoringOtherApps: true)
         let panel = NSOpenPanel()
         panel.title = "Add Files to Floqy Tray"
@@ -80,9 +97,24 @@ final class FilesTrayService: ObservableObject {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
 
-        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return 0 }
-        stageFiles(panel.urls)
-        return panel.urls.count
+        panel.begin { [weak self] response in
+            Task { @MainActor [weak self] in
+                guard let self, response == .OK, !panel.urls.isEmpty else {
+                    onComplete(0)
+                    return
+                }
+                self.stageFiles(panel.urls)
+                onComplete(panel.urls.count)
+            }
+        }
+    }
+
+    private func cleanupManagedTempFile(_ url: URL) {
+        let dirPath = Self.trayTempDirectoryURL.standardizedFileURL.path
+        let prefix = dirPath.hasSuffix("/") ? dirPath : dirPath + "/"
+        if url.standardizedFileURL.path.hasPrefix(prefix) {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     // MARK: - Smart Actions
@@ -169,7 +201,7 @@ final class FilesTrayService: ObservableObject {
     // MARK: - Off-Main ImageIO / PDFKit / Vision Workers
 
     private nonisolated static func trayOutputDirectory() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("FloqyTray", isDirectory: true)
+        let dir = trayTempDirectoryURL
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -187,7 +219,8 @@ final class FilesTrayService: ObservableObject {
         let ext = useWebP ? "webp" : "jpg"
 
         let baseName = sourceURL.deletingPathExtension().lastPathComponent
-        let outURL = try trayOutputDirectory().appendingPathComponent("\(baseName)-compressed.\(ext)")
+        let token = String(UUID().uuidString.prefix(6)).lowercased()
+        let outURL = try trayOutputDirectory().appendingPathComponent("\(baseName)-\(token)-compressed.\(ext)")
         try? FileManager.default.removeItem(at: outURL)
 
         guard let destination = CGImageDestinationCreateWithURL(outURL as CFURL, targetType as CFString, 1, nil) else {
@@ -210,7 +243,8 @@ final class FilesTrayService: ObservableObject {
         }
 
         let baseName = sourceURL.deletingPathExtension().lastPathComponent
-        let outURL = try trayOutputDirectory().appendingPathComponent("\(baseName)-compressed.pdf")
+        let token = String(UUID().uuidString.prefix(6)).lowercased()
+        let outURL = try trayOutputDirectory().appendingPathComponent("\(baseName)-\(token)-compressed.pdf")
         try? FileManager.default.removeItem(at: outURL)
 
         var firstBox = doc.page(at: 0)?.bounds(for: .mediaBox) ?? CGRect(x: 0, y: 0, width: 612, height: 792)
@@ -220,47 +254,49 @@ final class FilesTrayService: ObservableObject {
 
         let scale: CGFloat = 150.0 / 72.0
         for index in 0..<doc.pageCount {
-            guard let page = doc.page(at: index) else { continue }
-            let pageBox = page.bounds(for: .mediaBox)
-            let pixelWidth = max(1, Int(pageBox.width * scale))
-            let pixelHeight = max(1, Int(pageBox.height * scale))
+            autoreleasepool {
+                guard let page = doc.page(at: index) else { return }
+                let pageBox = page.bounds(for: .mediaBox)
+                let pixelWidth = max(1, Int(pageBox.width * scale))
+                let pixelHeight = max(1, Int(pageBox.height * scale))
 
-            guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
-                  let bitmapCtx = CGContext(
-                    data: nil,
-                    width: pixelWidth,
-                    height: pixelHeight,
-                    bitsPerComponent: 8,
-                    bytesPerRow: 0,
-                    space: colorSpace,
-                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-                  ) else {
-                continue
+                guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+                      let bitmapCtx = CGContext(
+                        data: nil,
+                        width: pixelWidth,
+                        height: pixelHeight,
+                        bitsPerComponent: 8,
+                        bytesPerRow: 0,
+                        space: colorSpace,
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                      ) else {
+                    return
+                }
+
+                bitmapCtx.setFillColor(NSColor.white.cgColor)
+                bitmapCtx.fill(CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
+                bitmapCtx.saveGState()
+                bitmapCtx.scaleBy(x: scale, y: scale)
+                page.draw(with: .mediaBox, to: bitmapCtx)
+                bitmapCtx.restoreGState()
+
+                guard let rendered = bitmapCtx.makeImage() else { return }
+                let rep = NSBitmapImageRep(cgImage: rendered)
+                guard let jpegData = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.68]),
+                      let provider = CGDataProvider(data: jpegData as CFData),
+                      let jpegImage = CGImage(
+                        jpegDataProviderSource: provider,
+                        decode: nil,
+                        shouldInterpolate: true,
+                        intent: .defaultIntent
+                      ) else {
+                    return
+                }
+
+                pdfContext.beginPDFPage([kCGPDFContextMediaBox as String: pageBox] as CFDictionary)
+                pdfContext.draw(jpegImage, in: CGRect(origin: .zero, size: pageBox.size))
+                pdfContext.endPDFPage()
             }
-
-            bitmapCtx.setFillColor(NSColor.white.cgColor)
-            bitmapCtx.fill(CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
-            bitmapCtx.saveGState()
-            bitmapCtx.scaleBy(x: scale, y: scale)
-            page.draw(with: .mediaBox, to: bitmapCtx)
-            bitmapCtx.restoreGState()
-
-            guard let rendered = bitmapCtx.makeImage() else { continue }
-            let rep = NSBitmapImageRep(cgImage: rendered)
-            guard let jpegData = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.68]),
-                  let provider = CGDataProvider(data: jpegData as CFData),
-                  let jpegImage = CGImage(
-                    jpegDataProviderSource: provider,
-                    decode: nil,
-                    shouldInterpolate: true,
-                    intent: .defaultIntent
-                  ) else {
-                continue
-            }
-
-            pdfContext.beginPDFPage([kCGPDFContextMediaBox as String: pageBox] as CFDictionary)
-            pdfContext.draw(jpegImage, in: CGRect(origin: .zero, size: pageBox.size))
-            pdfContext.endPDFPage()
         }
 
         pdfContext.closePDF()

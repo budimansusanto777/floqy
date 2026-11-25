@@ -10,11 +10,7 @@ final class ObsidianService: ObservableObject {
     private static let targetKey = "floqy.obsidian.target"
 
     static var localNotesDirectory: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        return appSupport
-            .appendingPathComponent("Floqy", isDirectory: true)
-            .appendingPathComponent("Notes", isDirectory: true)
+        FileManager.floqySupportDirectory.appendingPathComponent("Notes", isDirectory: true)
     }
 
     @Published var target: ObsidianNoteTarget {
@@ -46,7 +42,7 @@ final class ObsidianService: ObservableObject {
         loadRecentNotes()
     }
 
-    func chooseVaultFolder() {
+    func chooseVaultFolder(onComplete: (() -> Void)? = nil) {
         NSApp.activate(ignoringOtherApps: true)
         let panel = NSOpenPanel()
         panel.title = "Choose Notes Folder"
@@ -56,31 +52,21 @@ final class ObsidianService: ObservableObject {
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        do {
-            let bookmark: Data
-            do {
-                bookmark = try url.bookmarkData(
-                    options: .withSecurityScope,
-                    includingResourceValuesForKeys: nil,
-                    relativeTo: nil
-                )
-            } catch {
-                bookmark = try url.bookmarkData(
-                    options: [],
-                    includingResourceValuesForKeys: nil,
-                    relativeTo: nil
-                )
+        panel.begin { [weak self] response in
+            Task { @MainActor [weak self] in
+                defer { onComplete?() }
+                guard let self, response == .OK, let url = panel.url else { return }
+                do {
+                    let bookmark = try Self.makeBookmark(for: url)
+                    UserDefaults.standard.set(bookmark, forKey: Self.bookmarkKey)
+                    UserDefaults.standard.set(url.lastPathComponent, forKey: Self.vaultNameKey)
+                    self.vaultName = url.lastPathComponent
+                    self.lastError = nil
+                    self.loadRecentNotes()
+                } catch {
+                    self.lastError = "Could not save folder access: \(error.localizedDescription)"
+                }
             }
-
-            UserDefaults.standard.set(bookmark, forKey: Self.bookmarkKey)
-            UserDefaults.standard.set(url.lastPathComponent, forKey: Self.vaultNameKey)
-            vaultName = url.lastPathComponent
-            lastError = nil
-            loadRecentNotes()
-        } catch {
-            lastError = "Could not save folder access: \(error.localizedDescription)"
         }
     }
 
@@ -99,20 +85,20 @@ final class ObsidianService: ObservableObject {
     }
 
     func openActiveNotesFolder() {
-        if let vaultURL = resolveVaultURL() {
-            let didStartScope = vaultURL.startAccessingSecurityScopedResource()
-            defer {
-                if didStartScope {
-                    vaultURL.stopAccessingSecurityScopedResource()
-                }
-            }
-            NSWorkspace.shared.open(vaultURL)
+        guard let base = activeBaseDirectory() else {
+            lastError = "Vault folder unavailable. Re-select your folder."
             return
         }
-
-        let localDir = Self.localNotesDirectory
-        try? FileManager.default.createDirectory(at: localDir, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(localDir)
+        let didStartScope = base.isScoped ? base.url.startAccessingSecurityScopedResource() : false
+        defer {
+            if didStartScope {
+                base.url.stopAccessingSecurityScopedResource()
+            }
+        }
+        if !base.isScoped {
+            try? FileManager.default.createDirectory(at: base.url, withIntermediateDirectories: true)
+        }
+        NSWorkspace.shared.open(base.url)
     }
 
     @discardableResult
@@ -123,18 +109,20 @@ final class ObsidianService: ObservableObject {
             return false
         }
 
-        let scopedVault = resolveVaultURL()
-        let baseURL = scopedVault ?? Self.localNotesDirectory
-        let didStartScope = scopedVault?.startAccessingSecurityScopedResource() ?? false
+        guard let base = activeBaseDirectory() else {
+            lastError = "Vault folder unavailable. Re-select your folder."
+            return false
+        }
+        let didStartScope = base.isScoped ? base.url.startAccessingSecurityScopedResource() : false
         defer {
             if didStartScope {
-                scopedVault?.stopAccessingSecurityScopedResource()
+                base.url.stopAccessingSecurityScopedResource()
             }
         }
 
         let now = Date()
         let relativePath = ObsidianLogic.resolveRelativePath(for: target, date: now)
-        guard let fileURL = ObsidianLogic.safeTargetURL(vaultURL: baseURL, relativePath: relativePath) else {
+        guard let fileURL = ObsidianLogic.safeTargetURL(vaultURL: base.url, relativePath: relativePath) else {
             lastError = "Invalid note path."
             return false
         }
@@ -174,17 +162,20 @@ final class ObsidianService: ObservableObject {
     }
 
     func loadRecentNotes() {
-        let scopedVault = resolveVaultURL()
-        let baseURL = scopedVault ?? Self.localNotesDirectory
-        let didStartScope = scopedVault?.startAccessingSecurityScopedResource() ?? false
+        guard let base = activeBaseDirectory() else {
+            lastError = "Vault folder unavailable. Re-select your folder."
+            recentNotes = []
+            return
+        }
+        let didStartScope = base.isScoped ? base.url.startAccessingSecurityScopedResource() : false
         defer {
             if didStartScope {
-                scopedVault?.stopAccessingSecurityScopedResource()
+                base.url.stopAccessingSecurityScopedResource()
             }
         }
 
         let relativePath = ObsidianLogic.resolveRelativePath(for: target, date: Date())
-        guard let fileURL = ObsidianLogic.safeTargetURL(vaultURL: baseURL, relativePath: relativePath),
+        guard let fileURL = ObsidianLogic.safeTargetURL(vaultURL: base.url, relativePath: relativePath),
               let content = try? String(contentsOf: fileURL, encoding: .utf8) else {
             recentNotes = []
             return
@@ -197,26 +188,51 @@ final class ObsidianService: ObservableObject {
         recentNotes = Array(lines.suffix(3).reversed())
     }
 
+    private func activeBaseDirectory() -> (url: URL, isScoped: Bool)? {
+        if let scoped = resolveVaultURL() {
+            return (scoped, true)
+        }
+        if isVaultConfigured {
+            return nil
+        }
+        return (Self.localNotesDirectory, false)
+    }
+
+    private static func makeBookmark(for url: URL) throws -> Data {
+        do {
+            return try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+        } catch {
+            return try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+        }
+    }
+
     private func resolveVaultURL() -> URL? {
         guard let bookmark = UserDefaults.standard.data(forKey: Self.bookmarkKey) else {
             return nil
         }
 
         var isStale = false
-        if let scoped = try? URL(
+        let resolved = (try? URL(
             resolvingBookmarkData: bookmark,
             options: .withSecurityScope,
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
-        ) {
-            return scoped
-        }
-
-        return try? URL(
+        )) ?? (try? URL(
             resolvingBookmarkData: bookmark,
             options: [],
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
-        )
+        ))
+
+        if let resolved, isStale {
+            let accessed = resolved.startAccessingSecurityScopedResource()
+            defer {
+                if accessed { resolved.stopAccessingSecurityScopedResource() }
+            }
+            if let refreshed = try? Self.makeBookmark(for: resolved) {
+                UserDefaults.standard.set(refreshed, forKey: Self.bookmarkKey)
+            }
+        }
+        return resolved
     }
 }

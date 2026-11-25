@@ -55,7 +55,6 @@ struct MemoryConsumer: Identifiable, Equatable {
     let pid: Int32
     let name: String
     let residentBytes: UInt64
-    let isProtected: Bool
 }
 
 struct LocalDevPort: Identifiable, Equatable {
@@ -131,8 +130,7 @@ enum SystemLogic {
                 MemoryConsumer(
                     pid: pid,
                     name: name,
-                    residentBytes: rssKB * 1024,
-                    isProtected: false
+                    residentBytes: rssKB * 1024
                 )
             )
         }

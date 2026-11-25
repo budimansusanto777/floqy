@@ -4,7 +4,6 @@ import AppKit
 struct NotchGeometry: Equatable {
     static let earWidth: CGFloat = 12
     static let horizontalPadding: CGFloat = 24 // 12pt concave ear on each side
-    static let bottomShadowPadding: CGFloat = 24
     static let fallbackScreenFrame = CGRect(x: 0, y: 0, width: 1440, height: 900)
 
     let hasHardwareNotch: Bool
@@ -125,8 +124,6 @@ struct NotchGeometry: Equatable {
             return CGSize(width: 596, height: max(224, notchSafeTopHeight + 190))
         }
     }
-
-    var bottomCornerRadius: CGFloat { 26 }
 
     func bottomRadius(
         for mode: NotchMode,

@@ -28,6 +28,8 @@ final class CalendarService: ObservableObject {
     private var store = EKEventStore()
     private var storeObserver: NSObjectProtocol?
     private var refreshTimer: Timer?
+    private var refreshTickCount = 0
+    private var lastRefreshDayKey = CalendarLogic.dayKey(for: Date())
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -49,8 +51,12 @@ final class CalendarService: ObservableObject {
 
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.now = Date()
-                self?.refreshEvents()
+                guard let self else { return }
+                self.now = Date()
+                self.refreshTickCount += 1
+                if self.refreshTickCount >= 20 || CalendarLogic.dayKey(for: self.now) != self.lastRefreshDayKey {
+                    self.refreshEvents()
+                }
             }
         }
 
@@ -102,6 +108,8 @@ final class CalendarService: ObservableObject {
 
     func refreshEvents() {
         now = Date()
+        refreshTickCount = 0
+        lastRefreshDayKey = CalendarLogic.dayKey(for: now)
         authorizationStatus = EKEventStore.authorizationStatus(for: .event)
         guard authorizationStatus == .fullAccess else {
             syncedCalendarCount = 0
@@ -150,8 +158,9 @@ final class CalendarService: ObservableObject {
                     : "\(Self.timeFormatter.string(from: event.startDate)) – \(Self.timeFormatter.string(from: event.endDate))"
                 let fallbackTitle = event.title?.trimmingCharacters(in: .whitespacesAndNewlines)
 
+                let baseID = event.eventIdentifier ?? (fallbackTitle?.isEmpty == false ? fallbackTitle! : "event")
                 return CalendarEventItem(
-                    id: event.eventIdentifier ?? "\(event.startDate.timeIntervalSince1970)-\(fallbackTitle ?? "event")",
+                    id: "\(baseID)-\(Int(event.startDate.timeIntervalSince1970))",
                     title: (fallbackTitle?.isEmpty == false ? fallbackTitle! : "Untitled Event"),
                     startDate: event.startDate,
                     endDate: event.endDate,

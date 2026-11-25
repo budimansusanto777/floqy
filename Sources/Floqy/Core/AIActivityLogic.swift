@@ -303,6 +303,7 @@ enum AIActivityLogic {
         for line in jsonlContent.components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty,
+                  trimmed.contains("\"usage\""),
                   let data = trimmed.data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let timestampString = obj["timestamp"] as? String else {

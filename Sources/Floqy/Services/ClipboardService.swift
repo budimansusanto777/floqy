@@ -39,7 +39,7 @@ final class ClipboardService: ObservableObject {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
 
-        if entry.kind == .image, let data = entry.imageData, let image = NSImage(data: data) {
+        if entry.kind == .image, let data = entry.fullImageData ?? entry.imageData, let image = NSImage(data: data) {
             pasteboard.writeObjects([image])
         } else {
             pasteboard.setString(entry.textContent, forType: .string)
@@ -65,6 +65,11 @@ final class ClipboardService: ObservableObject {
         guard pasteboard.changeCount != lastChangeCount else { return }
         lastChangeCount = pasteboard.changeCount
 
+        let types = (pasteboard.types ?? []).map(\.rawValue)
+        if ClipboardLogic.shouldIgnorePasteboardTypes(types) {
+            return
+        }
+
         if let text = pasteboard.string(forType: .string) {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return }
@@ -80,13 +85,22 @@ final class ClipboardService: ObservableObject {
         if let imageData = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff),
            let image = NSImage(data: imageData),
            let thumbData = downscaledPNGData(for: image, maxSide: 96) {
+            // shortcut: keeps at most 5 full-res images in RAM (<=10MB each), spill to temp files if users copy larger sets
+            let fullData = imageData.count <= 10_000_000 ? imageData : downscaledPNGData(for: image, maxSide: 1600)
             let sizeLabel = "Image (\(Int(image.size.width)) × \(Int(image.size.height)))"
-            insertEntry(ClipboardEntry(kind: .image, textContent: sizeLabel, imageData: thumbData))
+            insertEntry(ClipboardEntry(kind: .image, textContent: sizeLabel, imageData: thumbData, fullImageData: fullData))
         }
     }
 
     private func insertEntry(_ entry: ClipboardEntry) {
         entries.insert(entry, at: 0)
+        while entries.filter({ $0.kind == .image }).count > 5 {
+            if let oldestUnpinnedImage = entries.lastIndex(where: { $0.kind == .image && !$0.isPinned }) {
+                entries.remove(at: oldestUnpinnedImage)
+            } else {
+                break
+            }
+        }
         while entries.count > maxEntries {
             if let lastUnpinned = entries.lastIndex(where: { !$0.isPinned }) {
                 entries.remove(at: lastUnpinned)

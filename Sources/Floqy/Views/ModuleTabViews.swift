@@ -32,23 +32,6 @@ struct NotchCard<Content: View>: View {
     }
 }
 
-private struct PhaseBadge: View {
-    let label: String
-
-    var body: some View {
-        Text(label)
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(NotchColors.textSecondary)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
-            .background(
-                Capsule()
-                    .fill(NotchColors.controlSurface)
-                    .overlay(Capsule().stroke(NotchColors.cardBorder, lineWidth: 1))
-            )
-    }
-}
-
 // MARK: - 1. Home Tab (Music + Calendar + Pomodoro/Todo Strip)
 
 struct HomeTabView: View {
@@ -754,9 +737,12 @@ struct FilesTabView: View {
                         .padding(.vertical, 3)
                     }
                     Button {
-                        let count = filesTray.pickFilesFromPanel()
-                        if count > 0 {
-                            manager.showToast(count == 1 ? "Added 1 file" : "Added \(count) files")
+                        manager.setPresentingFilePicker(true)
+                        filesTray.pickFilesFromPanel { count in
+                            manager.setPresentingFilePicker(false)
+                            if count > 0 {
+                                manager.showToast(count == 1 ? "Added 1 file" : "Added \(count) files")
+                            }
                         }
                     } label: {
                         Label("Add", systemImage: "plus")
@@ -770,9 +756,12 @@ struct FilesTabView: View {
 
                 if filesTray.items.isEmpty {
                     Button {
-                        let count = filesTray.pickFilesFromPanel()
-                        if count > 0 {
-                            manager.showToast(count == 1 ? "Added 1 file" : "Added \(count) files")
+                        manager.setPresentingFilePicker(true)
+                        filesTray.pickFilesFromPanel { count in
+                            manager.setPresentingFilePicker(false)
+                            if count > 0 {
+                                manager.showToast(count == 1 ? "Added 1 file" : "Added \(count) files")
+                            }
                         }
                     } label: {
                         VStack(spacing: 6) {
@@ -1290,7 +1279,10 @@ struct NotesTabView: View {
                     if isEditingNote {
                         endNoteEdit()
                     }
-                    obsidian.chooseVaultFolder()
+                    manager.setPresentingFilePicker(true)
+                    obsidian.chooseVaultFolder {
+                        manager.setPresentingFilePicker(false)
+                    }
                 }
                 if obsidian.isVaultConfigured {
                     Divider()
@@ -2062,6 +2054,8 @@ struct SystemTabView: View {
                                     Button {
                                         if system.terminateProcess(pid: consumer.pid, name: consumer.name) {
                                             manager.showToast("Sent quit to \(consumer.name)")
+                                        } else if let msg = system.statusMessage {
+                                            manager.showToast(msg)
                                         }
                                     } label: {
                                         Image(systemName: "xmark")
@@ -2164,6 +2158,8 @@ struct SystemTabView: View {
                                     Button {
                                         if system.terminateProcess(pid: port.pid, name: port.processName) {
                                             manager.showToast("Stopped :\(String(port.port))")
+                                        } else if let msg = system.statusMessage {
+                                            manager.showToast(msg)
                                         }
                                     } label: {
                                         Image(systemName: "xmark")

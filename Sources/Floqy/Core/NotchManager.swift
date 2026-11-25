@@ -32,7 +32,6 @@ final class NotchManager: ObservableObject {
     }
     @Published var activeTab: NotchTab = .home
     @Published var homeSubView: HomeSubView = .overview
-    @Published var compactActivity: CompactActivity = .music
     @Published var isShowingInlineSettings: Bool = false
     @Published var hoverToExpandEnabled: Bool = true
     @Published var alertSoundsEnabled: Bool {
@@ -89,9 +88,6 @@ final class NotchManager: ObservableObject {
     }
     @Published private(set) var wallpaperImage: NSImage?
 
-    var restingEyesEnabled: Bool {
-        idleAppearance.isVisible
-    }
     @Published var headphonesCardEnabled: Bool {
         didSet {
             UserDefaults.standard.set(headphonesCardEnabled, forKey: Self.headphonesCardEnabledKey)
@@ -234,7 +230,6 @@ final class NotchManager: ObservableObject {
 
     private func startServices() {
         productivity.onPomodoroStarted = { [weak self] in
-            self?.compactActivity = .pomodoro
             self?.syncCollapsedMode()
         }
         productivity.onPomodoroStateChanged = { [weak self] in
@@ -298,9 +293,6 @@ final class NotchManager: ObservableObject {
             if isEditingText {
                 endTextInput()
             }
-        }
-        if case .compact(let activity) = newMode {
-            compactActivity = activity
         }
 
         system.setSystemTabVisible(newMode.isExpanded && !isShowingInlineSettings && activeTab == .system)
@@ -441,7 +433,6 @@ final class NotchManager: ObservableObject {
     }
 
     func showCompact(_ activity: CompactActivity) {
-        compactActivity = activity
         setMode(.compact(activity))
     }
 
@@ -548,6 +539,9 @@ final class NotchManager: ObservableObject {
     }
 
     private func evaluateMeetingAlerts() {
+        let activeIDs = Set(calendar.upcomingEvents.map(\.id))
+        triggeredStartingMeetingIDs.formIntersection(activeIDs)
+
         let currentNow = calendar.now
         var nextHeadsUp: MeetingHeadsUp?
 
@@ -644,6 +638,13 @@ final class NotchManager: ObservableObject {
         }
     }
 
+    func setPresentingFilePicker(_ presenting: Bool) {
+        isPresentingFilePicker = presenting
+        if presenting {
+            hoverTask?.cancel()
+        }
+    }
+
     func handleHoverChanged(_ hovering: Bool) {
         guard hoverToExpandEnabled else { return }
         hoverTask?.cancel()
@@ -676,10 +677,7 @@ final class NotchManager: ObservableObject {
     // MARK: - Custom Notch Wallpaper
 
     private static var wallpaperStorageURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        return appSupport
-            .appendingPathComponent("Floqy", isDirectory: true)
+        FileManager.floqySupportDirectory
             .appendingPathComponent("notch-wallpaper.jpg")
     }
 

@@ -13,14 +13,26 @@ final class AIService: ObservableObject {
     var onAgentFinished: ((AIAgentKind) -> Void)?
     var onStateChanged: (() -> Void)?
 
+    private struct AIActivityStorage: Codable {
+        let dayKey: String
+        let counts: [String: Int]
+        let recentCompletions: [AICompletionRecord]
+    }
+
+    private struct ClaudeUsageCacheEntry {
+        let modified: Date
+        let size: Int
+        let summary: LocalTokenUsageSummary
+    }
+
     private var workingTimeoutTask: Task<Void, Never>?
     private let activityStorageURL: URL
+    private var dailyCounts: [String: Int] = [:]
+    private var dailyCountDayKey: String = CalendarLogic.dayKey(for: Date())
+    private var claudeFileCache: [String: ClaudeUsageCacheEntry] = [:]
 
     init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        self.activityStorageURL = appSupport
-            .appendingPathComponent("Floqy", isDirectory: true)
+        self.activityStorageURL = FileManager.floqySupportDirectory
             .appendingPathComponent("ai_activity.json")
     }
 
@@ -36,8 +48,8 @@ final class AIService: ObservableObject {
     }
 
     func todayCount(for agent: AIAgentKind) -> Int {
-        let startOfDay = Calendar.current.startOfDay(for: Date())
-        return recentCompletions.filter { $0.agent == agent && $0.completedAt >= startOfDay }.count
+        guard CalendarLogic.dayKey(for: Date()) == dailyCountDayKey else { return 0 }
+        return dailyCounts[agent.rawValue, default: 0]
     }
 
     func handleEvent(_ event: AIAgentEvent) {
@@ -52,6 +64,8 @@ final class AIService: ObservableObject {
             if workingAgent == event.agent {
                 workingAgent = nil
             }
+            syncDayIfNeeded()
+            dailyCounts[event.agent.rawValue, default: 0] += 1
             let startOfDay = Calendar.current.startOfDay(for: Date())
             var updated = recentCompletions.filter { $0.completedAt >= startOfDay }
             updated.insert(AICompletionRecord(agent: event.agent), at: 0)
@@ -139,25 +153,31 @@ final class AIService: ObservableObject {
     func refreshClaudeLocalUsage() {
         let projectsDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects")
         let startOfDay = Calendar.current.startOfDay(for: Date())
+        let cacheSnapshot = claudeFileCache
 
         Task { [weak self] in
-            let summary = await Task.detached(priority: .utility) {
-                Self.scanClaudeUsage(in: projectsDir, since: startOfDay)
+            let result = await Task.detached(priority: .utility) {
+                Self.scanClaudeUsage(in: projectsDir, since: startOfDay, cache: cacheSnapshot)
             }.value
 
             guard let self else { return }
-            self.claudeUsageToday = summary.totalTokens > 0 ? summary : nil
+            self.claudeFileCache = result.updatedCache
+            self.claudeUsageToday = result.summary.totalTokens > 0 ? result.summary : nil
         }
     }
 
-    private nonisolated static func scanClaudeUsage(in projectsDir: URL, since startOfDay: Date) -> LocalTokenUsageSummary {
+    private nonisolated static func scanClaudeUsage(
+        in projectsDir: URL,
+        since startOfDay: Date,
+        cache: [String: ClaudeUsageCacheEntry]
+    ) -> (summary: LocalTokenUsageSummary, updatedCache: [String: ClaudeUsageCacheEntry]) {
         guard FileManager.default.fileExists(atPath: projectsDir.path),
               let enumerator = FileManager.default.enumerator(
                   at: projectsDir,
-                  includingPropertiesForKeys: [.contentModificationDateKey],
+                  includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
                   options: [.skipsHiddenFiles]
               ) else {
-            return .empty
+            return (.empty, [:])
         }
 
         var input = 0
@@ -165,15 +185,34 @@ final class AIService: ObservableObject {
         var read = 0
         var write = 0
         var cost = 0.0
+        var nextCache: [String: ClaudeUsageCacheEntry] = [:]
 
         while let item = enumerator.nextObject() {
             guard let fileURL = item as? URL, fileURL.pathExtension == "jsonl" else { continue }
-            let values = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey])
-            if let modified = values?.contentModificationDate, modified < startOfDay {
+            let values = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+            let modified = values?.contentModificationDate
+            if let modified, modified < startOfDay {
                 continue
             }
-            guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else { continue }
-            let fileSummary = AIActivityLogic.parseClaudeJSONLUsage(jsonlContent: content, since: startOfDay)
+            let fileSize = values?.fileSize ?? -1
+            let path = fileURL.path
+
+            let fileSummary: LocalTokenUsageSummary
+            if let modified,
+               fileSize >= 0,
+               let cached = cache[path],
+               cached.modified == modified,
+               cached.size == fileSize {
+                fileSummary = cached.summary
+                nextCache[path] = cached
+            } else {
+                guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else { continue }
+                fileSummary = AIActivityLogic.parseClaudeJSONLUsage(jsonlContent: content, since: startOfDay)
+                if let modified, fileSize >= 0 {
+                    nextCache[path] = ClaudeUsageCacheEntry(modified: modified, size: fileSize, summary: fileSummary)
+                }
+            }
+
             input += fileSummary.inputTokens
             output += fileSummary.outputTokens
             read += fileSummary.cacheReadTokens
@@ -181,13 +220,14 @@ final class AIService: ObservableObject {
             cost += fileSummary.estimatedCostUSD
         }
 
-        return LocalTokenUsageSummary(
+        let summary = LocalTokenUsageSummary(
             inputTokens: input,
             outputTokens: output,
             cacheReadTokens: read,
             cacheWriteTokens: write,
             estimatedCostUSD: cost
         )
+        return (summary, nextCache)
     }
 
     private func scheduleWorkingSafetyClear() {
@@ -200,19 +240,51 @@ final class AIService: ObservableObject {
         }
     }
 
+    private func syncDayIfNeeded() {
+        let todayKey = CalendarLogic.dayKey(for: Date())
+        guard dailyCountDayKey != todayKey else { return }
+        dailyCountDayKey = todayKey
+        dailyCounts = [:]
+        recentCompletions = []
+    }
+
     private func loadTodayActivity() {
-        guard let data = try? Data(contentsOf: activityStorageURL),
-              let decoded = try? JSONDecoder().decode([AICompletionRecord].self, from: data) else {
+        let todayKey = CalendarLogic.dayKey(for: Date())
+        dailyCountDayKey = todayKey
+        let startOfDay = Calendar.current.startOfDay(for: Date())
+        guard let data = try? Data(contentsOf: activityStorageURL) else { return }
+
+        if let storage = try? JSONDecoder().decode(AIActivityStorage.self, from: data) {
+            if storage.dayKey == todayKey {
+                dailyCounts = storage.counts
+                recentCompletions = Array(storage.recentCompletions.filter { $0.completedAt >= startOfDay }.prefix(30))
+            } else {
+                dailyCounts = [:]
+                recentCompletions = []
+            }
             return
         }
-        let startOfDay = Calendar.current.startOfDay(for: Date())
-        recentCompletions = Array(decoded.filter { $0.completedAt >= startOfDay }.prefix(30))
+
+        if let legacy = try? JSONDecoder().decode([AICompletionRecord].self, from: data) {
+            let todayRecords = legacy.filter { $0.completedAt >= startOfDay }
+            var counts: [String: Int] = [:]
+            for record in todayRecords {
+                counts[record.agent.rawValue, default: 0] += 1
+            }
+            dailyCounts = counts
+            recentCompletions = Array(todayRecords.prefix(30))
+        }
     }
 
     private func saveActivity() {
         let dir = activityStorageURL.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        guard let data = try? JSONEncoder().encode(recentCompletions) else { return }
+        let payload = AIActivityStorage(
+            dayKey: dailyCountDayKey,
+            counts: dailyCounts,
+            recentCompletions: recentCompletions
+        )
+        guard let data = try? JSONEncoder().encode(payload) else { return }
         try? data.write(to: activityStorageURL, options: .atomic)
     }
 }

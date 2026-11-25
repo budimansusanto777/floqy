@@ -203,8 +203,15 @@ final class SystemMonitorService: ObservableObject {
 
         do {
             try process.run()
+            var errData = Data()
+            let group = DispatchGroup()
+            group.enter()
+            DispatchQueue.global(qos: .utility).async {
+                errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+                group.leave()
+            }
             let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+            group.wait()
             process.waitUntilExit()
             return (
                 process.terminationStatus,

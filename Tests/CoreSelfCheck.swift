@@ -148,6 +148,13 @@ enum CoreSelfCheck {
         let ignoredURL = CalendarLogic.extractMeetingURL(from: ["https://github.com/budimansusanto777/floqy"])
         precondition(ignoredURL == nil, "Non-meeting URL should be ignored")
 
+        precondition(CalendarLogic.meetingProvider(for: URL(string: "https://evil.com/meet.google.com/abc-defg-hij")!) == nil, "Spoofed Meet path must be rejected")
+        precondition(CalendarLogic.meetingProvider(for: URL(string: "https://phish-zoom.us/j/123456")!) == nil, "Spoofed Zoom host must be rejected")
+        precondition(CalendarLogic.meetingProvider(for: URL(string: "https://evil.com/teams.microsoft.com/meet/123")!) == nil, "Spoofed Teams path must be rejected")
+        precondition(CalendarLogic.meetingProvider(for: URL(string: "https://meet.google.com/abc-defg-hij")!) == "Google Meet", "Valid Meet URL mismatch")
+        precondition(CalendarLogic.meetingProvider(for: URL(string: "https://us02web.zoom.us/j/123456")!) == "Zoom", "Valid Zoom URL mismatch")
+        precondition(CalendarLogic.meetingProvider(for: URL(string: "https://teams.live.com/meet/987654")!) == "Teams", "Valid Teams URL mismatch")
+
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         precondition(
             CalendarLogic.formatCountdown(from: now, to: now.addingTimeInterval(-60), end: now.addingTimeInterval(600)) == "Now",
@@ -246,6 +253,11 @@ enum CoreSelfCheck {
         precondition(ObsidianLogic.safeTargetURL(vaultURL: vault, relativePath: "../../etc/passwd") == nil, "Path traversal must be blocked")
 
         // Clipboard classification & filtering
+        precondition(ClipboardLogic.shouldIgnorePasteboardTypes(["org.nspasteboard.ConcealedType", "public.utf8-plain-text"]), "Concealed pasteboard type must be ignored")
+        precondition(ClipboardLogic.shouldIgnorePasteboardTypes(["org.nspasteboard.TransientType"]), "Transient pasteboard type must be ignored")
+        precondition(ClipboardLogic.shouldIgnorePasteboardTypes(["com.agilebits.onepassword"]), "1Password pasteboard type must be ignored")
+        precondition(!ClipboardLogic.shouldIgnorePasteboardTypes(["public.utf8-plain-text"]), "Plain text pasteboard must be captured")
+
         precondition(ClipboardLogic.classifyText("https://github.com/budimansusanto777/floqy") == .url, "URL classification failed")
         precondition(ClipboardLogic.classifyText("func hello() { return }") == .code, "Code classification failed")
         precondition(ClipboardLogic.classifyText("Plain reminder note") == .text, "Plain text classification failed")
@@ -471,6 +483,8 @@ enum CoreSelfCheck {
         let recentTS = iso.string(from: now.addingTimeInterval(60))
         let oldTS = iso.string(from: now.addingTimeInterval(-3600))
         let sampleJSONL = """
+        {bad json line without usage
+        {"timestamp":"\(recentTS)","message":{"model":"claude-3-5-sonnet","content":"no usage object"}}
         {"timestamp":"\(oldTS)","message":{"model":"claude-3-5-sonnet","usage":{"input_tokens":500,"output_tokens":500}}}
         {"timestamp":"\(recentTS)","message":{"model":"claude-sonnet-4-5","usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":300,"cache_creation_input_tokens":100}}}
         """

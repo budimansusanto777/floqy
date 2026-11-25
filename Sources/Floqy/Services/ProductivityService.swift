@@ -5,6 +5,8 @@ import Foundation
 @MainActor
 final class ProductivityService: ObservableObject {
     private static let durationMinutesDefaultsKey = "floqy.pomodoro.durationMinutes"
+    private static let completedSessionsCountDefaultsKey = "floqy.pomodoro.completedSessionsCount"
+    private static let completedSessionsDayDefaultsKey = "floqy.pomodoro.completedSessionsDay"
 
     @Published private(set) var todos: [TodoItem] = []
     @Published private(set) var pomodoro: PomodoroState
@@ -24,16 +26,20 @@ final class ProductivityService: ObservableObject {
 
     private var timer: Timer?
     private let storageURL: URL
+    private var completedSessionsDayKey: String
 
     init() {
         let savedMinutes = UserDefaults.standard.integer(forKey: Self.durationMinutesDefaultsKey)
         let initialMinutes = savedMinutes > 0 ? savedMinutes : PomodoroState.defaultDurationMinutes
         self.pomodoro = PomodoroState(durationMinutes: initialMinutes)
 
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        self.storageURL = appSupport
-            .appendingPathComponent("Floqy", isDirectory: true)
+        let todayKey = CalendarLogic.dayKey(for: Date())
+        self.completedSessionsDayKey = todayKey
+        if UserDefaults.standard.string(forKey: Self.completedSessionsDayDefaultsKey) == todayKey {
+            self.completedSessionsToday = max(0, UserDefaults.standard.integer(forKey: Self.completedSessionsCountDefaultsKey))
+        }
+
+        self.storageURL = FileManager.floqySupportDirectory
             .appendingPathComponent("todos.json")
         loadTodos()
     }
@@ -50,6 +56,7 @@ final class ProductivityService: ObservableObject {
     }
 
     func togglePomodoro() {
+        syncSessionDayIfNeeded()
         pomodoro.isRunning.toggle()
         if pomodoro.isRunning {
             if pomodoro.remainingSeconds <= 0 {
@@ -65,12 +72,14 @@ final class ProductivityService: ObservableObject {
     }
 
     func resetPomodoro() {
+        syncSessionDayIfNeeded()
         let alreadyAtStart = pomodoro.isAtInitialStart
         timer?.invalidate()
         timer = nil
         pomodoro.reset()
         if alreadyAtStart && completedSessionsToday > 0 {
             completedSessionsToday = 0
+            saveCompletedSessions()
         }
         onPomodoroStateChanged?()
     }
@@ -82,13 +91,28 @@ final class ProductivityService: ObservableObject {
                 guard let self else { return }
                 let completed = self.pomodoro.tick()
                 if completed {
+                    self.syncSessionDayIfNeeded()
                     self.completedSessionsToday += 1
+                    self.saveCompletedSessions()
                     self.timer?.invalidate()
                     self.timer = nil
                     self.onPomodoroCompleted?()
                 }
             }
         }
+    }
+
+    private func syncSessionDayIfNeeded() {
+        let todayKey = CalendarLogic.dayKey(for: Date())
+        guard completedSessionsDayKey != todayKey else { return }
+        completedSessionsDayKey = todayKey
+        completedSessionsToday = 0
+        saveCompletedSessions()
+    }
+
+    private func saveCompletedSessions() {
+        UserDefaults.standard.set(completedSessionsToday, forKey: Self.completedSessionsCountDefaultsKey)
+        UserDefaults.standard.set(completedSessionsDayKey, forKey: Self.completedSessionsDayDefaultsKey)
     }
 
     // MARK: - Todos

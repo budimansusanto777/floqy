@@ -138,21 +138,12 @@ enum MeetingAlertStage: Equatable {
 }
 
 enum CalendarLogic {
-    private static let supportedMeetingHosts: [(prefix: String, provider: String)] = [
-        ("meet.google.com/", "Google Meet"),
-        ("zoom.us/j/", "Zoom"),
-        ("zoom.us/w/", "Zoom"),
-        ("teams.microsoft.com/l/meetup-join/", "Teams"),
-        ("teams.microsoft.com/meet/", "Teams"),
-        ("teams.live.com/meet/", "Teams")
-    ]
+    private static let linkDetector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
 
     static func extractMeetingURL(from candidates: [String?]) -> URL? {
+        guard let detector = linkDetector else { return nil }
         for raw in candidates {
             guard let text = raw, !text.isEmpty else { continue }
-            guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
-                continue
-            }
             let range = NSRange(text.startIndex..<text.endIndex, in: text)
             for match in detector.matches(in: text, options: [], range: range) {
                 guard let url = match.url, url.scheme?.lowercased() == "https" else { continue }
@@ -166,9 +157,21 @@ enum CalendarLogic {
     }
 
     static func meetingProvider(for url: URL) -> String? {
-        let hostAndPath = ((url.host ?? "") + url.path).lowercased()
-        for entry in supportedMeetingHosts where hostAndPath.contains(entry.prefix) {
-            return entry.provider
+        guard let host = url.host?.lowercased() else { return nil }
+        let path = url.path.lowercased()
+        if host == "meet.google.com", path.hasPrefix("/"), path.count > 1 {
+            return "Google Meet"
+        }
+        if host == "zoom.us" || host.hasSuffix(".zoom.us"),
+           path.hasPrefix("/j/") || path.hasPrefix("/w/") {
+            return "Zoom"
+        }
+        if host == "teams.microsoft.com",
+           path.hasPrefix("/l/meetup-join/") || path.hasPrefix("/meet/") {
+            return "Teams"
+        }
+        if host == "teams.live.com", path.hasPrefix("/meet/") {
+            return "Teams"
         }
         return nil
     }
