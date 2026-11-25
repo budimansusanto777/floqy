@@ -16,6 +16,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchManager.stop()
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            notchManager.handleIncomingURL(url)
+        }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }

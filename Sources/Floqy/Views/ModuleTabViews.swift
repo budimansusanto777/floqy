@@ -1577,39 +1577,216 @@ struct ClipboardTabView: View {
 
 struct AITabView: View {
     @ObservedObject var manager: NotchManager
+    @ObservedObject var ai: AIService
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
 
     var body: some View {
+        HStack(spacing: 10) {
+            activityCard
+            agentsCard
+        }
+        .onAppear {
+            ai.refreshHookStatus()
+            ai.refreshClaudeLocalUsage()
+        }
+    }
+
+    private var activityCard: some View {
         NotchCard {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Image(systemName: "command")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(NotchColors.accentPrimary)
-                    Text("Floqy AI Agent")
-                        .font(.system(size: 12.5, weight: .semibold))
+                    Label("AI Activity", systemImage: "command")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(NotchColors.textPrimary)
+
+                    Spacer(minLength: 4)
+
+                    Text(ai.workingAgent.map { "\($0.shortName) Working" } ?? "Idle")
+                        .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(ai.workingAgent != nil ? NotchColors.accentPrimary : NotchColors.textSecondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule().fill(
+                                ai.workingAgent != nil
+                                    ? NotchColors.accentPrimary.opacity(0.16)
+                                    : Color.white.opacity(0.06)
+                            )
+                        )
+                }
+
+                HStack(spacing: 5) {
+                    counterTile(title: "Antigravity", count: ai.todayCount(for: .antigravity))
+                    counterTile(title: "Gemini", count: ai.todayCount(for: .geminiCLI))
+                    counterTile(title: "Claude", count: ai.todayCount(for: .claudeCode))
+                }
+
+                if let usage = ai.claudeUsageToday {
+                    HStack {
+                        Text("Claude Code today")
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(NotchColors.statusWarning)
+                        Spacer()
+                        Text("\(LocalTokenUsageSummary.formatTokens(usage.totalTokens)) tok • \(LocalTokenUsageSummary.formatUSD(usage.estimatedCostUSD))")
+                            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(NotchColors.statusWarning)
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(NotchColors.statusWarning.opacity(0.1))
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(NotchColors.statusWarning.opacity(0.25), lineWidth: 1))
+                    )
+                }
+
+                Divider().overlay(NotchColors.cardBorder)
+
+                if ai.recentCompletions.isEmpty {
+                    Text("Connect a hook to receive completion alerts.")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(NotchColors.textSecondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 4) {
+                            ForEach(ai.recentCompletions) { record in
+                                HStack(spacing: 6) {
+                                    Text(record.agent.displayName)
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(accentColor(for: record.agent))
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 2)
+                                        .background(RoundedRectangle(cornerRadius: 4).fill(accentColor(for: record.agent).opacity(0.14)))
+
+                                    Text(Self.timeFormatter.string(from: record.completedAt))
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(NotchColors.textSecondary)
+
+                                    Spacer(minLength: 4)
+
+                                    Button("Open") {
+                                        ai.openAgentApp(record.agent)
+                                    }
+                                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
+                                    .font(.system(size: 9.5, weight: .semibold))
+                                    .foregroundStyle(NotchColors.textPrimary)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var agentsCard: some View {
+        NotchCard {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Label("Agents", systemImage: "bolt.fill")
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(NotchColors.textPrimary)
                     Spacer()
-                    PhaseBadge(label: "Phase 4")
+                    Text("Hooks")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(NotchColors.textSecondary)
                 }
 
-                Text("BYOK (Gemini, OpenAI, Claude) and local Ollama support with Keychain storage, cross-module context, and background notch execution.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(NotchColors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Divider().overlay(NotchColors.cardBorder)
 
-                Spacer(minLength: 4)
-
-                Button {
-                    manager.showCompact(.ai)
-                } label: {
-                    Label("Preview AI Wing", systemImage: "command")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(NotchColors.accentPrimary)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 5) {
+                        ForEach(AIAgentKind.allCases) { agent in
+                            agentRow(agent)
+                        }
+                    }
                 }
-                .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 7))
             }
+        }
+    }
+
+    private func agentRow(_ agent: AIAgentKind) -> some View {
+        let isConnected = ai.hookStatus[agent] == true
+
+        return HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(agent.displayName)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(NotchColors.textPrimary)
+                    .lineLimit(1)
+                Text(agent.subtitle)
+                    .font(.system(size: 9))
+                    .foregroundStyle(NotchColors.textSecondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 4)
+
+            if agent.supportsHook {
+                Button(isConnected ? "Connected" : "Connect") {
+                    let message = ai.toggleHook(for: agent)
+                    manager.showToast(message)
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(isConnected ? NotchColors.statusHealthy : NotchColors.accentPrimary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill((isConnected ? NotchColors.statusHealthy : NotchColors.accentPrimary).opacity(0.14))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 5)
+                                .stroke((isConnected ? NotchColors.statusHealthy : NotchColors.accentPrimary).opacity(0.35), lineWidth: 1)
+                        )
+                )
+            }
+
+            Button("Open") {
+                ai.openAgentApp(agent)
+            }
+            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
+            .font(.system(size: 9.5, weight: .semibold))
+            .foregroundStyle(NotchColors.textPrimary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+        }
+    }
+
+    private func counterTile(title: String, count: Int) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+                .font(.system(size: 9))
+                .foregroundStyle(NotchColors.textSecondary)
+                .lineLimit(1)
+            Text("\(count)")
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundStyle(NotchColors.textPrimary)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(Color.white.opacity(0.04))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(NotchColors.cardBorder, lineWidth: 1))
+        )
+    }
+
+    private func accentColor(for agent: AIAgentKind) -> Color {
+        switch agent {
+        case .antigravity: return NotchColors.accentPrimary
+        case .geminiCLI: return NotchColors.statusHealthy
+        case .claudeCode, .claudeDesktop: return NotchColors.statusWarning
         }
     }
 }

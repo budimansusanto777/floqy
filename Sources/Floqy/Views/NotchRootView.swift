@@ -58,6 +58,14 @@ struct NotchRootView: View {
             let accent = provider == "Google Meet" ? NotchColors.statusHealthy : NotchColors.accentPrimary
             return accent.opacity(0.45)
         }
+        if case .alert(.aiFinished(let agent)) = manager.mode {
+            let accent: Color = switch agent {
+            case .antigravity: NotchColors.accentPrimary
+            case .geminiCLI: NotchColors.statusHealthy
+            case .claudeCode, .claudeDesktop: NotchColors.statusWarning
+            }
+            return accent.opacity(0.55)
+        }
         return Color.white.opacity(manager.mode == .idle ? 0.0 : 0.14)
     }
 
@@ -113,6 +121,7 @@ struct NotchRootView: View {
                         music: manager.music,
                         productivity: manager.productivity,
                         system: manager.system,
+                        ai: manager.ai,
                         activity: activity
                     )
                     .frame(width: activityCompactSize.width, height: activityCompactSize.height)

@@ -131,7 +131,7 @@ struct SettingsView: View {
             }
 
             Section("About Floqy") {
-                LabeledContent("Version", value: "0.3.0 (Phase 3)")
+                LabeledContent("Version", value: "0.4.0 (Phase 4)")
                 LabeledContent("License", value: "GNU GPLv3")
                 LabeledContent("Copyright", value: "© 2026 budimansusanto777")
             }

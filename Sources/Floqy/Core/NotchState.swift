@@ -4,6 +4,7 @@ import SwiftUI
 enum NotchAlert: Equatable, Hashable {
     case pomodoroComplete(durationMinutes: Int)
     case meetingStarting(eventId: String, title: String, provider: String, url: URL)
+    case aiFinished(agent: AIAgentKind)
 }
 
 /// Represents the four visual states of the Floqy notch window.
@@ -34,6 +35,7 @@ enum NotchMode: Equatable, Hashable {
         pomodoroRunning: Bool,
         pomodoroPaused: Bool,
         showPausedPomodoroInNotch: Bool,
+        hasActiveAIWork: Bool = false,
         isMemoryAlertActive: Bool = false,
         isMusicPlaying: Bool
     ) -> NotchMode {
@@ -45,6 +47,9 @@ enum NotchMode: Equatable, Hashable {
         }
         if pomodoroRunning {
             return .compact(.pomodoro)
+        }
+        if hasActiveAIWork {
+            return .compact(.ai)
         }
         if isMemoryAlertActive {
             return .compact(.memory)

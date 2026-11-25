@@ -26,7 +26,7 @@ Built with native Swift, SwiftUI, and AppKit for macOS 14.0+ (Sonoma).
 | Left | **Files** | Smart Drag-and-Drop Tray, native AirDrop, image/PDF compression & WebP conversion, offline OCR |
 | Left | **Notes & Todo** | Obsidian Quick Note capture (append to Vault Markdown) + persistent Todo list & Focus Timer |
 | Right | **Copy** | Searchable clipboard history (`⌘⇧V`) with auto-type badges, pinning, and AI handoff |
-| Right | **AI** | BYOK (Gemini, OpenAI, Claude) & local Ollama agent with cross-module context and background orb |
+| Right | **AI** | Official Antigravity, Gemini CLI & Claude Code completion hooks (`floqy://`), Claude Desktop launch, & local stats |
 | Right | **System** | Kernel-level Memory Pressure monitor, top RAM consumers, 1-click Quit/Purge, & local dev ports |
 
 ## Notch States
@@ -71,7 +71,7 @@ open build/Floqy.app
 - [x] **Phase 1** — Daily Flow Core (`Home`: Spotify/Apple Music, EventKit Calendar, Pomodoro & Todo)
 - [x] **Phase 2** — Productivity Power Tools (`Files` Smart Tray, `Notes → Obsidian`, `Copy` Clipboard Manager)
 - [x] **Phase 3** — Unified `System` Tab (Memory Monitor + Local Dev Ports)
-- [ ] **Phase 4** — AI Agent Integration (BYOK + Ollama + Cross-Module Context)
+- [x] **Phase 4** — AI Agent Notifications & Hooks (Antigravity, Gemini CLI, Claude Code + Claude Desktop quick launch)
 - [ ] **Phase 5** — Polish, Launch at Login, multi-monitor & `.dmg` distribution
 
 ## License

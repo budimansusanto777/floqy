@@ -15,7 +15,8 @@ enum CoreSelfCheck {
         checkProductivityToolsLogic()
         checkNotchEnhancementsLogic()
         checkSystemLogic()
-        print("CoreSelfCheck: 11/11 checks passed.")
+        checkAIActivityLogic()
+        print("CoreSelfCheck: 12/12 checks passed.")
     }
 
     private static func checkNotchedScreenDetection() {
@@ -410,6 +411,64 @@ enum CoreSelfCheck {
             isMusicPlaying: true
         )
         precondition(resolvedMem == .compact(.memory), "High RAM alert must precede Music & paused Pomodoro")
+    }
+
+    private static func checkAIActivityLogic() {
+        let parsedDone = AIActivityLogic.parseIncomingURL(URL(string: "floqy://ai?agent=antigravity&state=done")!)
+        precondition(parsedDone == AIAgentEvent(agent: .antigravity, state: .done), "Failed to parse Antigravity done URL")
+        let parsedWorking = AIActivityLogic.parseIncomingURL(URL(string: "floqy://ai?agent=geminiCLI&state=working")!)
+        precondition(parsedWorking == AIAgentEvent(agent: .geminiCLI, state: .working), "Failed to parse Gemini CLI working URL")
+        precondition(AIActivityLogic.parseIncomingURL(URL(string: "https://example.com/ai")!) == nil, "Non-floqy URL must be ignored")
+
+        // Antigravity hooks.json non-destructive upsert/remove
+        let existingAgy = #"{"user-hook":{"enabled":true}}"#
+        let mergedAgy = AIActivityLogic.upsertHook(in: existingAgy, for: .antigravity)
+        precondition(mergedAgy?.contains("user-hook") == true && AIActivityLogic.isHookInstalled(in: mergedAgy, for: .antigravity), "Antigravity hook upsert failed")
+        let cleanedAgy = AIActivityLogic.removeHook(from: mergedAgy, for: .antigravity)
+        precondition(cleanedAgy?.contains("user-hook") == true && !AIActivityLogic.isHookInstalled(in: cleanedAgy, for: .antigravity), "Antigravity hook remove failed")
+
+        // Gemini CLI settings.json non-destructive upsert/remove
+        let existingGem = #"{"theme":"dark","hooks":{"BeforeTool":[{"matcher":"*","hooks":[{"name":"other","type":"command","command":"echo 1"}]}]}}"#
+        let mergedGem = AIActivityLogic.upsertHook(in: existingGem, for: .geminiCLI)
+        precondition(mergedGem?.contains("BeforeTool") == true && AIActivityLogic.isHookInstalled(in: mergedGem, for: .geminiCLI), "Gemini CLI hook upsert failed")
+        let cleanedGem = AIActivityLogic.removeHook(from: mergedGem, for: .geminiCLI)
+        precondition(cleanedGem?.contains("BeforeTool") == true && !AIActivityLogic.isHookInstalled(in: cleanedGem, for: .geminiCLI), "Gemini CLI hook remove failed")
+
+        // Claude Code settings.json non-destructive upsert/remove
+        let existingClaude = #"{"model":"sonnet","hooks":{"Stop":[{"hooks":[{"type":"command","command":"say hi"}]}]}}"#
+        let mergedClaude = AIActivityLogic.upsertHook(in: existingClaude, for: .claudeCode)
+        precondition(mergedClaude?.contains("say hi") == true && AIActivityLogic.isHookInstalled(in: mergedClaude, for: .claudeCode), "Claude Code hook upsert failed")
+        let cleanedClaude = AIActivityLogic.removeHook(from: mergedClaude, for: .claudeCode)
+        precondition(cleanedClaude?.contains("say hi") == true && !AIActivityLogic.isHookInstalled(in: cleanedClaude, for: .claudeCode), "Claude Code hook remove failed")
+
+        // Invalid JSON guard
+        precondition(AIActivityLogic.upsertHook(in: "{bad json", for: .antigravity) == nil, "Invalid JSON must fail safely")
+
+        // Local Claude JSONL usage parsing
+        let now = Date()
+        let iso = ISO8601DateFormatter()
+        let recentTS = iso.string(from: now.addingTimeInterval(60))
+        let oldTS = iso.string(from: now.addingTimeInterval(-3600))
+        let sampleJSONL = """
+        {"timestamp":"\(oldTS)","message":{"model":"claude-3-5-sonnet","usage":{"input_tokens":500,"output_tokens":500}}}
+        {"timestamp":"\(recentTS)","message":{"model":"claude-sonnet-4-5","usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":300,"cache_creation_input_tokens":100}}}
+        """
+        let summary = AIActivityLogic.parseClaudeJSONLUsage(jsonlContent: sampleJSONL, since: now)
+        precondition(summary.inputTokens == 1000 && summary.outputTokens == 200 && summary.totalTokens == 1600, "Claude JSONL usage parse mismatch")
+        precondition(summary.estimatedCostUSD > 0, "Claude JSONL cost must be positive")
+
+        // Priority with active AI work
+        let resolvedAI = NotchMode.resolvedCollapsedMode(
+            activeAlert: nil,
+            hasMeetingHeadsUp: false,
+            pomodoroRunning: false,
+            pomodoroPaused: false,
+            showPausedPomodoroInNotch: true,
+            hasActiveAIWork: true,
+            isMemoryAlertActive: true,
+            isMusicPlaying: true
+        )
+        precondition(resolvedAI == .compact(.ai), "Active AI work must precede Memory & Music")
     }
 }
 

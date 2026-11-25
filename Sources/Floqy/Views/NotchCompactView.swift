@@ -6,6 +6,7 @@ struct NotchCompactView: View {
     @ObservedObject var music: MusicService
     @ObservedObject var productivity: ProductivityService
     @ObservedObject var system: SystemMonitorService
+    @ObservedObject var ai: AIService
     let activity: CompactActivity
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -95,7 +96,7 @@ struct NotchCompactView: View {
                 Image(systemName: "command")
                     .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(NotchColors.accentPrimary)
-                Text("Floqy Agent")
+                Text(ai.workingAgent?.shortName ?? "Floqy AI")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(NotchColors.textPrimary)
                     .lineLimit(1)
@@ -193,9 +194,9 @@ struct NotchCompactView: View {
                     productivity.pomodoro.isRunning ? NotchColors.statusAlert : NotchColors.textSecondary
                 )
         case .ai:
-            Text("Ready")
+            Text(ai.workingAgent != nil ? "Working" : "Ready")
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(NotchColors.statusHealthy)
+                .foregroundStyle(ai.workingAgent != nil ? NotchColors.accentPrimary : NotchColors.statusHealthy)
         case .memory:
             let memColor = system.snapshot.pressureLevel == .critical ? NotchColors.statusAlert : NotchColors.statusWarning
             Text("\(system.snapshot.usedPercent)%")
@@ -221,20 +222,32 @@ struct NotchAlertView: View {
                 alertBadge
                 alertLabels
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        manager.setMode(.expanded)
-                    }
                 alertActions
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if case .aiFinished(let agent) = alert {
+                    manager.openAgentFromAlert(agent)
+                } else {
+                    manager.setMode(.expanded)
+                }
+            }
         }
         .onAppear {
             if !reduceMotion {
                 iconPopped = true
             }
+        }
+    }
+
+    private func accentColor(for agent: AIAgentKind) -> Color {
+        switch agent {
+        case .antigravity: return NotchColors.accentPrimary
+        case .geminiCLI: return NotchColors.statusHealthy
+        case .claudeCode, .claudeDesktop: return NotchColors.statusWarning
         }
     }
 
@@ -269,6 +282,21 @@ struct NotchAlertView: View {
                                 .stroke(accent.opacity(0.35), lineWidth: 1)
                         )
                 )
+        case .aiFinished(let agent):
+            let accent = accentColor(for: agent)
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(accent)
+                .symbolEffect(.bounce, value: iconPopped)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(accent.opacity(0.16))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(accent.opacity(0.35), lineWidth: 1)
+                        )
+                )
         }
     }
 
@@ -293,6 +321,17 @@ struct NotchAlertView: View {
                     .foregroundStyle(NotchColors.textPrimary)
                     .lineLimit(1)
                 Text("\(provider) • Starting now")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(NotchColors.textSecondary)
+                    .lineLimit(1)
+            }
+        case .aiFinished(let agent):
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(agent.displayName) finished")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(NotchColors.textPrimary)
+                    .lineLimit(1)
+                Text("Response ready • Click to open")
                     .font(.system(size: 10.5))
                     .foregroundStyle(NotchColors.textSecondary)
                     .lineLimit(1)
@@ -347,6 +386,8 @@ struct NotchAlertView: View {
                 .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 7))
                 .accessibilityLabel("Dismiss meeting notification")
             }
+        case .aiFinished:
+            EmptyView()
         }
     }
 }

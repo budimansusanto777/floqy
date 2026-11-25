@@ -53,7 +53,7 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.3.0</string>
+    <string>0.4.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
@@ -64,6 +64,17 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>${BUNDLE_ID}</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>floqy</string>
+            </array>
+        </dict>
+    </array>
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>Floqy reads your upcoming calendar events and meeting links to display them inside the Home tab.</string>
     <key>NSCalendarsUsageDescription</key>

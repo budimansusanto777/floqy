@@ -186,7 +186,7 @@ struct NotchExpandedView: View {
                 clipboard: manager.clipboard
             )
         case .ai:
-            AITabView(manager: manager)
+            AITabView(manager: manager, ai: manager.ai)
         case .system:
             SystemTabView(manager: manager, system: manager.system)
         }

@@ -52,6 +52,7 @@ final class NotchManager: ObservableObject {
     let obsidian = ObsidianService()
     let clipboard = ClipboardService()
     let system = SystemMonitorService()
+    let ai = AIService()
 
     private var panel: NotchPanel?
     private var updateTrackingRect: (() -> Void)?
@@ -98,6 +99,7 @@ final class NotchManager: ObservableObject {
     }
 
     func stop() {
+        ai.stop()
         system.stop()
         music.stop()
         calendar.stop()
@@ -120,6 +122,13 @@ final class NotchManager: ObservableObject {
             self?.syncCollapsedMode()
         }
 
+        ai.onStateChanged = { [weak self] in
+            self?.syncCollapsedMode()
+        }
+        ai.onAgentFinished = { [weak self] agent in
+            self?.triggerAIFinishedAlert(agent: agent)
+        }
+
         music.$track
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -138,6 +147,7 @@ final class NotchManager: ObservableObject {
         calendar.start()
         clipboard.start()
         system.start()
+        ai.start()
     }
 
     // MARK: - State Transitions
@@ -281,6 +291,7 @@ final class NotchManager: ObservableObject {
             pomodoroRunning: productivity.pomodoro.isRunning,
             pomodoroPaused: productivity.pomodoro.isPaused,
             showPausedPomodoroInNotch: showPausedPomodoroInNotch,
+            hasActiveAIWork: ai.workingAgent != nil,
             isMemoryAlertActive: isMemoryAlert,
             isMusicPlaying: music.track?.isPlaying == true
         )
@@ -288,6 +299,28 @@ final class NotchManager: ObservableObject {
         if !mode.isExpanded && mode != desired {
             setMode(desired)
         }
+    }
+
+    func handleIncomingURL(_ url: URL) {
+        guard let event = AIActivityLogic.parseIncomingURL(url) else { return }
+        ai.handleEvent(event)
+    }
+
+    func openAgentFromAlert(_ agent: AIAgentKind) {
+        ai.openAgentApp(agent)
+        dismissActiveAlert()
+    }
+
+    func triggerAIFinishedAlert(agent: AIAgentKind) {
+        if alertSoundsEnabled {
+            NSSound(named: NSSound.Name("Glass"))?.play()
+        }
+        activeAlert = .aiFinished(agent: agent)
+        scheduleAlertAutoDismiss(after: 4.0)
+        if mode.isExpanded {
+            showToast("\(agent.displayName) finished")
+        }
+        syncCollapsedMode()
     }
 
     func triggerPomodoroCompletedAlert() {
