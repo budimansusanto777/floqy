@@ -8,7 +8,11 @@ struct NotchRootView: View {
     @State private var isDragTargeted = false
 
     private var shellSize: CGSize {
-        manager.geometry.shellSize(for: manager.mode)
+        manager.geometry.shellSize(
+            for: manager.mode,
+            homeSubView: manager.homeSubView,
+            activeTab: manager.activeTab
+        )
     }
 
     private var earRadius: CGFloat {
@@ -60,7 +64,12 @@ struct NotchRootView: View {
                 case .idle:
                     NotchIdleView(manager: manager)
                 case .compact(let activity):
-                    NotchCompactView(manager: manager, activity: activity)
+                    NotchCompactView(
+                        manager: manager,
+                        music: manager.music,
+                        productivity: manager.productivity,
+                        activity: activity
+                    )
                 case .expanded:
                     NotchExpandedView(manager: manager)
                 }
@@ -80,6 +89,8 @@ struct NotchRootView: View {
             handleFileDrop(providers: providers)
         }
         .animation(transitionAnimation, value: manager.mode)
+        .animation(transitionAnimation, value: manager.homeSubView)
+        .animation(transitionAnimation, value: manager.activeTab)
         .preferredColorScheme(.dark)
     }
 

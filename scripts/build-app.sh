@@ -64,6 +64,12 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Floqy reads your upcoming calendar events and meeting links to display them inside the Home tab.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>Floqy reads your upcoming calendar events and meeting links to display them inside the Home tab.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Floqy controls playback and reads track metadata from Spotify and Apple Music.</string>
 </dict>
 </plist>
 EOF

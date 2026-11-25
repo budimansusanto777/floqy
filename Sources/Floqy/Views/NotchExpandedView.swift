@@ -46,10 +46,16 @@ struct NotchExpandedView: View {
 
     private var cameraSafeHeader: some View {
         HStack(spacing: 0) {
-            Text("Floqy")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(NotchColors.textSecondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 6) {
+                Text("Floqy")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(NotchColors.textSecondary)
+
+                if manager.activeTab == .home {
+                    homeSubViewToggle
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Spacer()
                 .frame(width: manager.geometry.notchCenterGapWidth)
@@ -70,6 +76,35 @@ struct NotchExpandedView: View {
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
+    }
+
+    private var homeSubViewToggle: some View {
+        HStack(spacing: 2) {
+            ForEach(HomeSubView.allCases, id: \.self) { subView in
+                let isSelected = manager.homeSubView == subView
+                Button {
+                    manager.setHomeSubView(subView)
+                } label: {
+                    Text(subView.title)
+                        .font(.system(size: 10, weight: isSelected ? .semibold : .medium))
+                        .foregroundStyle(isSelected ? NotchColors.textPrimary : NotchColors.textSecondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                }
+                .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5, isSelected: isSelected))
+                .accessibilityLabel("\(subView.title) mode")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(NotchColors.cardSurface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(NotchColors.cardBorder, lineWidth: 1)
+                )
+        )
     }
 
     private var tabBar: some View {
@@ -93,7 +128,7 @@ struct NotchExpandedView: View {
     private func tabButton(_ tab: NotchTab, shortcutIndex: Int) -> some View {
         let isSelected = manager.activeTab == tab
         return Button {
-            manager.activeTab = tab
+            manager.selectTab(tab)
         } label: {
             HStack(spacing: 4) {
                 Text(tab.title)
@@ -121,11 +156,19 @@ struct NotchExpandedView: View {
     private var tabContent: some View {
         switch manager.activeTab {
         case .home:
-            HomeTabView(manager: manager)
+            HomeTabView(
+                manager: manager,
+                music: manager.music,
+                calendar: manager.calendar,
+                productivity: manager.productivity
+            )
         case .files:
             FilesTabView(manager: manager)
         case .notes:
-            NotesTabView(manager: manager)
+            NotesTabView(
+                manager: manager,
+                productivity: manager.productivity
+            )
         case .clipboard:
             ClipboardTabView(manager: manager)
         case .ai:

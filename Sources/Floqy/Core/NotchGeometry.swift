@@ -68,8 +68,12 @@ struct NotchGeometry: Equatable {
         }
     }
 
-    /// Returns the content shell size (excluding the outer concave ears) for a given notch mode.
-    func shellSize(for mode: NotchMode) -> CGSize {
+    /// Returns the content shell size (excluding the outer concave ears) for a given notch mode and active sub-view.
+    func shellSize(
+        for mode: NotchMode,
+        homeSubView: HomeSubView = .overview,
+        activeTab: NotchTab = .home
+    ) -> CGSize {
         switch mode {
         case .idle:
             return hasHardwareNotch
@@ -84,6 +88,9 @@ struct NotchGeometry: Equatable {
                 height: max(34, hardwareNotchSize.height)
             )
         case .expanded:
+            if activeTab == .home && homeSubView == .calendar {
+                return CGSize(width: 560, height: max(268, notchSafeTopHeight + 234))
+            }
             return CGSize(width: 560, height: max(228, notchSafeTopHeight + 194))
         }
     }
@@ -98,9 +105,13 @@ struct NotchGeometry: Equatable {
         }
     }
 
-    /// Returns the NSPanel frame sized for the given mode and anchored top-center on the target screen.
-    func panelFrame(for mode: NotchMode) -> CGRect {
-        let shell = shellSize(for: mode)
+    /// Returns the NSPanel frame sized for the given mode/sub-view and anchored top-center on the target screen.
+    func panelFrame(
+        for mode: NotchMode,
+        homeSubView: HomeSubView = .overview,
+        activeTab: NotchTab = .home
+    ) -> CGRect {
+        let shell = shellSize(for: mode, homeSubView: homeSubView, activeTab: activeTab)
         let totalWidth = shell.width + earPadding(for: mode)
         let totalHeight = shell.height + bottomPadding(for: mode)
         let originX = round(screenFrame.midX - (totalWidth / 2))
@@ -114,9 +125,14 @@ struct NotchGeometry: Equatable {
     }
 
     /// Active notch hit-test rect (shell + active ears) in AppKit panel-local bottom-left coordinates.
-    func hitRectInPanel(for mode: NotchMode, in containerSize: CGSize? = nil) -> CGRect {
-        let size = containerSize ?? panelFrame(for: mode).size
-        let shell = shellSize(for: mode)
+    func hitRectInPanel(
+        for mode: NotchMode,
+        homeSubView: HomeSubView = .overview,
+        activeTab: NotchTab = .home,
+        in containerSize: CGSize? = nil
+    ) -> CGRect {
+        let size = containerSize ?? panelFrame(for: mode, homeSubView: homeSubView, activeTab: activeTab).size
+        let shell = shellSize(for: mode, homeSubView: homeSubView, activeTab: activeTab)
         let totalWidth = shell.width + earPadding(for: mode)
         let originX = (size.width - totalWidth) / 2
         let originY = size.height - shell.height

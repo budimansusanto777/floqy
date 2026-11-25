@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 @main
 enum CoreSelfCheck {
@@ -9,7 +10,9 @@ enum CoreSelfCheck {
         checkHitRectsContainedAndOrderedByMode()
         checkNotchShellShapeGeneratesNonEmptyPaths()
         checkSixTabsAreSymmetrical()
-        print("CoreSelfCheck: 6/6 checks passed.")
+        checkDailyFlowLogic()
+        checkMonthGridLogic()
+        print("CoreSelfCheck: 8/8 checks passed.")
     }
 
     private static func checkNotchedScreenDetection() {
@@ -69,9 +72,14 @@ enum CoreSelfCheck {
         precondition(compactFrame.height <= geometry.hardwareNotchSize.height + 12, "Compact panel height must stay tight")
         precondition(abs(compactFrame.maxY - screenFrame.maxY) <= 0.5, "Compact panel must anchor to screen top")
 
-        let expandedFrame = geometry.panelFrame(for: .expanded)
-        precondition(expandedFrame == geometry.panelCanvasFrame(), "Expanded frame must equal panelCanvasFrame")
-        precondition(expandedFrame.width == 560 + NotchGeometry.horizontalPadding, "Expanded panel width mismatch")
+        let expandedOverview = geometry.panelFrame(for: .expanded, homeSubView: .overview, activeTab: .home)
+        precondition(expandedOverview == geometry.panelCanvasFrame(), "Expanded overview frame must equal panelCanvasFrame")
+        precondition(expandedOverview.width == 560 + NotchGeometry.horizontalPadding, "Expanded panel width mismatch")
+
+        let expandedCalendar = geometry.panelFrame(for: .expanded, homeSubView: .calendar, activeTab: .home)
+        precondition(expandedCalendar.height > expandedOverview.height, "Calendar mode height must exceed Overview height")
+        let filesWhileCalendar = geometry.panelFrame(for: .expanded, homeSubView: .calendar, activeTab: .files)
+        precondition(filesWhileCalendar.height == expandedOverview.height, "Non-Home tabs must stay at Overview height")
     }
 
     private static func checkHitRectsContainedAndOrderedByMode() {
@@ -119,5 +127,74 @@ enum CoreSelfCheck {
         precondition(NotchTab.leftTabs.count == 3, "Expected 3 left tabs")
         precondition(NotchTab.rightTabs.count == 3, "Expected 3 right tabs")
         precondition(Set(NotchTab.leftTabs + NotchTab.rightTabs) == Set(NotchTab.allCases), "Tabs must cover all cases")
+    }
+
+    private static func checkDailyFlowLogic() {
+        let meetURL = CalendarLogic.extractMeetingURL(from: [
+            nil,
+            "Join here: https://meet.google.com/abc-defg-hij.",
+            "https://example.com/ignored"
+        ])
+        precondition(meetURL?.absoluteString == "https://meet.google.com/abc-defg-hij", "Failed to extract Google Meet URL")
+
+        let zoomURL = CalendarLogic.extractMeetingURL(from: ["https://us02web.zoom.us/j/123456789?pwd=xyz"])
+        precondition(zoomURL?.host == "us02web.zoom.us", "Failed to extract Zoom URL")
+
+        let ignoredURL = CalendarLogic.extractMeetingURL(from: ["https://github.com/budimansusanto777/floqy"])
+        precondition(ignoredURL == nil, "Non-meeting URL should be ignored")
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        precondition(
+            CalendarLogic.formatCountdown(from: now, to: now.addingTimeInterval(-60), end: now.addingTimeInterval(600)) == "Now",
+            "Active meeting should show Now"
+        )
+        precondition(
+            CalendarLogic.formatCountdown(from: now, to: now.addingTimeInterval(12 * 60), end: now.addingTimeInterval(42 * 60)) == "In 12 min",
+            "12-minute countdown mismatch"
+        )
+        precondition(
+            CalendarLogic.formatCountdown(from: now, to: now.addingTimeInterval(90 * 60), end: now.addingTimeInterval(120 * 60)) == "In 1h 30m",
+            "Hour/minute countdown mismatch"
+        )
+
+        var pomo = PomodoroState(remainingSeconds: 2, isRunning: true)
+        precondition(pomo.formattedTime == "00:02", "Pomodoro time formatting mismatch")
+        precondition(!pomo.tick() && pomo.remainingSeconds == 1 && pomo.isRunning, "First tick should decrement")
+        precondition(pomo.tick() && pomo.remainingSeconds == 0 && !pomo.isRunning, "Second tick should complete")
+        pomo.reset()
+        precondition(pomo.remainingSeconds == PomodoroState.defaultDuration && !pomo.isRunning, "Reset mismatch")
+
+        pomo.setDuration(minutes: 0)
+        precondition(pomo.durationMinutes == 1 && pomo.formattedTime == "01:00", "Min duration clamp mismatch")
+        pomo.setDuration(minutes: 999)
+        precondition(pomo.durationMinutes == 120 && pomo.formattedTime == "120:00", "Max duration clamp mismatch")
+        pomo.setDuration(minutes: 45)
+        precondition(pomo.durationMinutes == 45 && pomo.formattedTime == "45:00", "45m preset mismatch")
+        _ = pomo.tick()
+        pomo.reset()
+        precondition(pomo.remainingSeconds == 45 * 60 && !pomo.isRunning, "Reset must restore configured duration")
+
+        precondition(NowPlayingTrack.formatDuration(88) == "1:28", "Duration format mismatch")
+        precondition(NowPlayingTrack.formatDuration(-5) == "0:00", "Negative duration format mismatch")
+
+        let sample = [TodoItem(title: "Ship Phase 1", isDone: false)]
+        let encoded = try? JSONEncoder().encode(sample)
+        let decoded = encoded.flatMap { try? JSONDecoder().decode([TodoItem].self, from: $0) }
+        precondition(decoded == sample, "TodoItem JSON round-trip mismatch")
+    }
+
+    private static func checkMonthGridLogic() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+
+        // August 2026 starts on Saturday (weekday 7 -> 6 leading blanks + 31 days = 37 cells -> 6 rows)
+        let augAnchor = cal.date(from: DateComponents(year: 2026, month: 8, day: 15))!
+        let augBounds = CalendarLogic.monthBounds(for: augAnchor, calendar: cal)
+        let augCells = CalendarLogic.monthGridCells(for: augAnchor, calendar: cal)
+        precondition(CalendarLogic.dayKey(for: augBounds.start, calendar: cal) == "2026-08-01", "Month start mismatch")
+        precondition(CalendarLogic.dayKey(for: augBounds.end, calendar: cal) == "2026-09-01", "Month end mismatch")
+        precondition(augCells.count == 37, "August 2026 grid should have 6 leading blanks + 31 days")
+        precondition(augCells.prefix(6).allSatisfy { $0.date == nil }, "First 6 cells must be blank")
+        precondition(augCells.last?.dayNumber == 31, "Last day should be 31")
     }
 }

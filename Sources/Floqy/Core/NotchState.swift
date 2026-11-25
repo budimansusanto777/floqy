@@ -74,3 +74,16 @@ enum NotchTab: String, CaseIterable, Identifiable, Hashable {
         }
     }
 }
+
+/// Sub-view displayed inside the Home tab.
+enum HomeSubView: String, CaseIterable, Equatable, Hashable {
+    case overview
+    case calendar
+
+    var title: String {
+        switch self {
+        case .overview: return "Overview"
+        case .calendar: return "Calendar"
+        }
+    }
+}

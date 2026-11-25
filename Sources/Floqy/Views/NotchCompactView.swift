@@ -3,6 +3,8 @@ import SwiftUI
 /// Compact Live Activity wings displayed on either side of the hardware camera notch.
 struct NotchCompactView: View {
     @ObservedObject var manager: NotchManager
+    @ObservedObject var music: MusicService
+    @ObservedObject var productivity: ProductivityService
     let activity: CompactActivity
 
     var body: some View {
@@ -32,10 +34,18 @@ struct NotchCompactView: View {
         switch activity {
         case .music:
             HStack(spacing: 6) {
-                Image(systemName: "music.note")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(NotchColors.accentPrimary)
-                Text("Midnight Flow")
+                if let artwork = music.artworkImage {
+                    Image(nsImage: artwork)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 16, height: 16)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                } else {
+                    Image(systemName: "music.note")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(NotchColors.accentPrimary)
+                }
+                Text(music.track?.title ?? "No Music")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(NotchColors.textPrimary)
                     .lineLimit(1)
@@ -55,7 +65,7 @@ struct NotchCompactView: View {
                 Image(systemName: "timer")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(NotchColors.statusAlert)
-                Text("Focus Mode")
+                Text(productivity.pomodoro.isRunning ? "Focus" : "Paused")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(NotchColors.textPrimary)
                     .lineLimit(1)
@@ -87,19 +97,14 @@ struct NotchCompactView: View {
     private var rightWing: some View {
         switch activity {
         case .music:
-            HStack(spacing: 2) {
-                ForEach([10.0, 14.0, 8.0, 12.0], id: \.self) { height in
-                    Capsule()
-                        .fill(NotchColors.accentPrimary)
-                        .frame(width: 2.5, height: height)
-                }
-            }
+            EqualizerBarsView(isPlaying: music.track?.isPlaying == true)
+                .frame(height: 14)
         case .dev:
             Text("68%")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(NotchColors.accentPrimary)
         case .pomodoro:
-            Text("25:00")
+            Text(productivity.pomodoro.formattedTime)
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(NotchColors.statusAlert)
         case .ai:
@@ -111,5 +116,46 @@ struct NotchCompactView: View {
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(NotchColors.statusWarning)
         }
+    }
+}
+
+/// 4-bar audio equalizer that animates only during active playback and respects Reduce Motion.
+struct EqualizerBarsView: View {
+    let isPlaying: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+
+    private let restHeights: [CGFloat] = [5, 8, 6, 7]
+    private let activeHeightsA: [CGFloat] = [12, 7, 14, 9]
+    private let activeHeightsB: [CGFloat] = [6, 13, 8, 12]
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 2) {
+            ForEach(0..<4, id: \.self) { index in
+                Capsule()
+                    .fill(NotchColors.accentPrimary)
+                    .frame(width: 2.5, height: barHeight(at: index))
+                    .animation(barAnimation(at: index), value: pulse)
+            }
+        }
+        .onAppear {
+            if isPlaying && !reduceMotion {
+                pulse = true
+            }
+        }
+        .onChange(of: isPlaying) { _, playing in
+            pulse = playing && !reduceMotion
+        }
+    }
+
+    private func barHeight(at index: Int) -> CGFloat {
+        guard isPlaying else { return restHeights[index] }
+        if reduceMotion { return activeHeightsA[index] }
+        return pulse ? activeHeightsA[index] : activeHeightsB[index]
+    }
+
+    private func barAnimation(at index: Int) -> Animation? {
+        guard isPlaying, !reduceMotion else { return .easeOut(duration: 0.15) }
+        return .easeInOut(duration: 0.42 + Double(index) * 0.09).repeatForever(autoreverses: true)
     }
 }
