@@ -12,6 +12,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchManager.start()
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        notchManager.stop()
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }

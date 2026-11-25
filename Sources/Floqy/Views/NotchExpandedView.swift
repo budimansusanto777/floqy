@@ -166,7 +166,8 @@ struct NotchExpandedView: View {
                 manager: manager,
                 music: manager.music,
                 calendar: manager.calendar,
-                productivity: manager.productivity
+                productivity: manager.productivity,
+                system: manager.system
             )
         case .files:
             FilesTabView(
@@ -187,7 +188,7 @@ struct NotchExpandedView: View {
         case .ai:
             AITabView(manager: manager)
         case .system:
-            SystemTabView(manager: manager)
+            SystemTabView(manager: manager, system: manager.system)
         }
     }
 }

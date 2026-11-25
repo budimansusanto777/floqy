@@ -48,6 +48,7 @@ struct HomeTabView: View {
     @ObservedObject var music: MusicService
     @ObservedObject var calendar: CalendarService
     @ObservedObject var productivity: ProductivityService
+    @ObservedObject var system: SystemMonitorService
 
     private static let monthFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -89,15 +90,23 @@ struct HomeTabView: View {
                         manager.selectTab(.notes)
                     }
                     wingTile(
-                        title: "System",
+                        title: "RAM \(system.snapshot.usedPercent)%",
                         icon: "cpu",
-                        color: NotchColors.statusWarning
+                        color: systemPressureColor(system.snapshot.pressureLevel)
                     ) {
                         manager.selectTab(.system)
                     }
                 }
                 .frame(height: 38)
             }
+        }
+    }
+
+    private func systemPressureColor(_ level: MemoryPressureLevel) -> Color {
+        switch level {
+        case .nominal: return NotchColors.statusHealthy
+        case .warning: return NotchColors.statusWarning
+        case .critical: return NotchColors.statusAlert
         }
     }
 
@@ -247,7 +256,7 @@ struct HomeTabView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else {
-                    ScrollView {
+                    ScrollView(.vertical, showsIndicators: false) {
                         VStack(spacing: 5) {
                             ForEach(dayEvents) { event in
                                 calendarMeetingRow(event, showCountdown: isToday || event.startDate > calendar.now)
@@ -755,7 +764,7 @@ struct FilesTabView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else {
                     let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 3)
-                    ScrollView {
+                    ScrollView(.vertical, showsIndicators: false) {
                         LazyVGrid(columns: columns, spacing: 6) {
                             ForEach(filesTray.items) { item in
                                 fileTile(item)
@@ -1133,7 +1142,7 @@ struct NotesTabView: View {
                         .foregroundStyle(NotchColors.textSecondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else {
-                    ScrollView {
+                    ScrollView(.vertical, showsIndicators: false) {
                         VStack(spacing: 4) {
                             ForEach(productivity.todos) { item in
                                 HStack(spacing: 6) {
@@ -1294,6 +1303,7 @@ struct NotesTabView: View {
     private func beginNoteEdit() {
         if isAddingTodo { cancelNewTodo() }
         if isEditingTimer { cancelTimerEdit() }
+        obsidian.clearTransientFeedback()
         isEditingNote = true
         manager.beginTextInput()
         isNoteFieldFocused = true
@@ -1314,12 +1324,14 @@ struct NotesTabView: View {
     }
 
     private func appendObsidianNote() {
-        if obsidian.appendNote(body: noteDraft, tags: selectedTags) {
-            noteDraft = ""
-            selectedTags.removeAll()
-            endNoteEdit()
-            manager.showToast("Saved to Obsidian")
-        }
+        let body = noteDraft
+        let tags = selectedTags
+        guard obsidian.appendNote(body: body, tags: tags) else { return }
+        // Resign key focus before clearing bindings so AppKit's field editor never writes the old text back.
+        endNoteEdit()
+        noteDraft = ""
+        selectedTags.removeAll()
+        manager.showToast("Saved to \(obsidian.isVaultConfigured ? obsidian.storageLabel : "Notes")")
     }
 
     private func startTimerEdit() {
@@ -1348,11 +1360,12 @@ struct NotesTabView: View {
     }
 
     private func commitNewTodo() {
-        productivity.addTodo(newTodoText)
-        newTodoText = ""
+        let title = newTodoText
         isAddingTodo = false
         isTodoFieldFocused = false
         manager.endTextInput()
+        newTodoText = ""
+        productivity.addTodo(title)
     }
 
     private func cancelNewTodo() {
@@ -1463,7 +1476,7 @@ struct ClipboardTabView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else {
-                    ScrollView {
+                    ScrollView(.vertical, showsIndicators: false) {
                         VStack(spacing: 5) {
                             ForEach(visibleEntries) { entry in
                                 clipboardRow(entry)
@@ -1605,62 +1618,215 @@ struct AITabView: View {
 
 struct SystemTabView: View {
     @ObservedObject var manager: NotchManager
+    @ObservedObject var system: SystemMonitorService
 
     var body: some View {
         HStack(spacing: 10) {
-            NotchCard {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Label("Memory Pressure", systemImage: "memorychip")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(NotchColors.textPrimary)
-                        Spacer()
-                        PhaseBadge(label: "Phase 3")
-                    }
-                    Text("Kernel RAM stats (App, Wired, Compressed, Swap), top consumers with 1-click Kill, and Purge.")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(NotchColors.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 4)
-                    Button {
-                        manager.showCompact(.memory)
-                    } label: {
-                        Label("Preview RAM Wing", systemImage: "memorychip")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(NotchColors.statusWarning)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
-                    }
-                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 7))
-                }
-            }
+            memoryCard
+            devAndPortsCard
+        }
+        .onAppear {
+            system.setSystemTabVisible(true)
+        }
+        .onDisappear {
+            system.setSystemTabVisible(false)
+        }
+    }
 
-            NotchCard {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Label("Dev Live Activity & Ports", systemImage: "hammer.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(NotchColors.textPrimary)
-                        Spacer()
-                        PhaseBadge(label: "Phase 3")
-                    }
-                    Text("Active local port scanner (:3000, :5173, :5432) and companion `floqy` CLI build updates.")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(NotchColors.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+    private var memoryCard: some View {
+        let snap = system.snapshot
+        let levelColor = pressureColor(snap.pressureLevel)
+
+        return NotchCard {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Label("Memory", systemImage: "memorychip")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(NotchColors.textPrimary)
+
+                    Text("\(snap.usedPercent)%")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(levelColor)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(levelColor.opacity(0.16)))
+
                     Spacer(minLength: 4)
-                    Button {
-                        manager.showCompact(.dev)
-                    } label: {
-                        Label("Preview Build Wing", systemImage: "hammer.fill")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(NotchColors.accentPrimary)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
+
+                    Button(system.isPurging ? "Purging…" : "Purge") {
+                        Task {
+                            let message = await system.purgeMemoryCache()
+                            manager.showToast(message)
+                        }
                     }
-                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 7))
+                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NotchColors.textSecondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .disabled(system.isPurging)
+                }
+
+                memoryBar(snap)
+
+                Text(
+                    "App \(MemorySnapshot.formatBytes(snap.appBytes)) • Wired \(MemorySnapshot.formatBytes(snap.wiredBytes)) • Comp \(MemorySnapshot.formatBytes(snap.compressedBytes)) • Swap \(MemorySnapshot.formatBytes(snap.swapUsedBytes))"
+                )
+                .font(.system(size: 9.5, design: .monospaced))
+                .foregroundStyle(NotchColors.textSecondary)
+                .lineLimit(1)
+
+                Divider().overlay(NotchColors.cardBorder)
+
+                if system.topConsumers.isEmpty {
+                    Text("Scanning memory consumers…")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(NotchColors.textSecondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 4) {
+                            ForEach(system.topConsumers) { consumer in
+                                HStack(spacing: 6) {
+                                    Text(consumer.name)
+                                        .font(.system(size: 10.5, weight: .medium))
+                                        .foregroundStyle(NotchColors.textPrimary)
+                                        .lineLimit(1)
+
+                                    Spacer(minLength: 4)
+
+                                    Text(MemorySnapshot.formatBytes(consumer.residentBytes))
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(NotchColors.textSecondary)
+
+                                    Button {
+                                        if system.terminateProcess(pid: consumer.pid, name: consumer.name) {
+                                            manager.showToast("Sent quit to \(consumer.name)")
+                                        }
+                                    } label: {
+                                        Image(systemName: "xmark")
+                                            .font(.system(size: 8.5, weight: .semibold))
+                                            .foregroundStyle(NotchColors.textSecondary)
+                                            .frame(width: 18, height: 18)
+                                    }
+                                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 4))
+                                    .accessibilityLabel("Quit \(consumer.name)")
+                                }
+                            }
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    private func memoryBar(_ snap: MemorySnapshot) -> some View {
+        let total = max(1.0, Double(snap.totalBytes))
+        let appFrac = min(1.0, Double(snap.appBytes) / total)
+        let wiredFrac = min(max(0.0, 1.0 - appFrac), Double(snap.wiredBytes) / total)
+        let compFrac = min(max(0.0, 1.0 - appFrac - wiredFrac), Double(snap.compressedBytes) / total)
+
+        return GeometryReader { proxy in
+            HStack(spacing: 1) {
+                Rectangle()
+                    .fill(NotchColors.accentPrimary)
+                    .frame(width: max(0, proxy.size.width * appFrac))
+                Rectangle()
+                    .fill(NotchColors.statusWarning)
+                    .frame(width: max(0, proxy.size.width * wiredFrac))
+                Rectangle()
+                    .fill(NotchColors.statusAlert)
+                    .frame(width: max(0, proxy.size.width * compFrac))
+                Spacer(minLength: 0)
+            }
+            .background(Color.white.opacity(0.08))
+            .clipShape(Capsule())
+        }
+        .frame(height: 6)
+    }
+
+    private var devAndPortsCard: some View {
+        NotchCard {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Label("Local Ports", systemImage: "network")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(NotchColors.textPrimary)
+
+                    Spacer(minLength: 4)
+
+                    Button {
+                        system.refreshProcessesAndPorts()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(NotchColors.textSecondary)
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
+                    .accessibilityLabel("Refresh ports and processes")
+                }
+
+                Divider().overlay(NotchColors.cardBorder)
+
+                if system.localPorts.isEmpty {
+                    Text("No active local dev ports.")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(NotchColors.textSecondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 4) {
+                            ForEach(system.localPorts) { port in
+                                HStack(spacing: 6) {
+                                    Text(verbatim: ":\(port.port)")
+                                        .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(NotchColors.accentPrimary)
+
+                                    Text(port.processName)
+                                        .font(.system(size: 10.5))
+                                        .foregroundStyle(NotchColors.textSecondary)
+                                        .lineLimit(1)
+
+                                    Spacer(minLength: 4)
+
+                                    if port.isHTTP {
+                                        Button("Open") {
+                                            system.openLocalPort(port)
+                                        }
+                                        .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
+                                        .font(.system(size: 9.5, weight: .semibold))
+                                        .foregroundStyle(NotchColors.textPrimary)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                    }
+
+                                    Button {
+                                        if system.terminateProcess(pid: port.pid, name: port.processName) {
+                                            manager.showToast("Stopped :\(String(port.port))")
+                                        }
+                                    } label: {
+                                        Image(systemName: "xmark")
+                                            .font(.system(size: 8.5, weight: .semibold))
+                                            .foregroundStyle(NotchColors.textSecondary)
+                                            .frame(width: 18, height: 18)
+                                    }
+                                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 4))
+                                    .accessibilityLabel("Stop \(port.processName) on port \(String(port.port))")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func pressureColor(_ level: MemoryPressureLevel) -> Color {
+        switch level {
+        case .nominal: return NotchColors.statusHealthy
+        case .warning: return NotchColors.statusWarning
+        case .critical: return NotchColors.statusAlert
         }
     }
 }

@@ -14,6 +14,7 @@ struct MeetingHeadsUp: Equatable {
 final class NotchManager: ObservableObject {
     private static let alertSoundsKey = "floqy.notifications.soundsEnabled"
     private static let showPausedPomodoroKey = "floqy.pomodoro.showPausedInNotch"
+    private static let ramAlertEnabledKey = "floqy.system.ramAlertEnabled"
 
     @Published var mode: NotchMode = .idle
     @Published var activeTab: NotchTab = .home
@@ -31,6 +32,12 @@ final class NotchManager: ObservableObject {
             syncCollapsedMode()
         }
     }
+    @Published var ramAlertEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(ramAlertEnabled, forKey: Self.ramAlertEnabledKey)
+            syncCollapsedMode()
+        }
+    }
     @Published var isEditingText: Bool = false
     @Published var isDragTargeted: Bool = false
     @Published var toastMessage: String?
@@ -44,6 +51,7 @@ final class NotchManager: ObservableObject {
     let filesTray = FilesTrayService()
     let obsidian = ObsidianService()
     let clipboard = ClipboardService()
+    let system = SystemMonitorService()
 
     private var panel: NotchPanel?
     private var updateTrackingRect: (() -> Void)?
@@ -63,6 +71,7 @@ final class NotchManager: ObservableObject {
     init() {
         self.alertSoundsEnabled = UserDefaults.standard.object(forKey: Self.alertSoundsKey) as? Bool ?? true
         self.showPausedPomodoroInNotch = UserDefaults.standard.object(forKey: Self.showPausedPomodoroKey) as? Bool ?? true
+        self.ramAlertEnabled = UserDefaults.standard.object(forKey: Self.ramAlertEnabledKey) as? Bool ?? true
         self.geometry = NotchGeometry(screen: NotchGeometry.preferredScreen())
     }
 
@@ -88,6 +97,13 @@ final class NotchManager: ObservableObject {
         startServices()
     }
 
+    func stop() {
+        system.stop()
+        music.stop()
+        calendar.stop()
+        clipboard.stop()
+    }
+
     private func startServices() {
         productivity.onPomodoroStarted = { [weak self] in
             self?.compactActivity = .pomodoro
@@ -98,6 +114,10 @@ final class NotchManager: ObservableObject {
         }
         productivity.onPomodoroCompleted = { [weak self] in
             self?.triggerPomodoroCompletedAlert()
+        }
+
+        system.onStateChanged = { [weak self] in
+            self?.syncCollapsedMode()
         }
 
         music.$track
@@ -117,6 +137,7 @@ final class NotchManager: ObservableObject {
         music.start()
         calendar.start()
         clipboard.start()
+        system.start()
     }
 
     // MARK: - State Transitions
@@ -137,6 +158,8 @@ final class NotchManager: ObservableObject {
             compactActivity = activity
         }
 
+        system.setSystemTabVisible(newMode.isExpanded && activeTab == .system)
+
         applyPanelFrame(for: newMode, tab: activeTab, subView: homeSubView) {
             mode = newMode
         }
@@ -154,6 +177,7 @@ final class NotchManager: ObservableObject {
             endTextInput()
         }
         let targetMode: NotchMode = mode.isExpanded ? mode : .expanded
+        system.setSystemTabVisible(targetMode.isExpanded && tab == .system)
         applyPanelFrame(for: targetMode, tab: tab, subView: homeSubView) {
             activeTab = tab
             if !mode.isExpanded {
@@ -250,12 +274,14 @@ final class NotchManager: ObservableObject {
     // MARK: - Live Activity Priority & Alerts
 
     func syncCollapsedMode() {
+        let isMemoryAlert = ramAlertEnabled && system.snapshot.usedPercent >= SystemLogic.ramAlertThresholdPercent
         let desired = NotchMode.resolvedCollapsedMode(
             activeAlert: activeAlert,
             hasMeetingHeadsUp: meetingHeadsUp != nil,
             pomodoroRunning: productivity.pomodoro.isRunning,
             pomodoroPaused: productivity.pomodoro.isPaused,
             showPausedPomodoroInNotch: showPausedPomodoroInNotch,
+            isMemoryAlertActive: isMemoryAlert,
             isMusicPlaying: music.track?.isPlaying == true
         )
         lastNonExpandedMode = desired

@@ -27,22 +27,13 @@ Built with native Swift, SwiftUI, and AppKit for macOS 14.0+ (Sonoma).
 | Left | **Notes & Todo** | Obsidian Quick Note capture (append to Vault Markdown) + persistent Todo list & Focus Timer |
 | Right | **Copy** | Searchable clipboard history (`⌘⇧V`) with auto-type badges, pinning, and AI handoff |
 | Right | **AI** | BYOK (Gemini, OpenAI, Claude) & local Ollama agent with cross-module context and background orb |
-| Right | **System** | Kernel-level Memory Pressure monitor, top RAM consumers, 1-click Kill/Purge, Dev Live Activity & local ports |
+| Right | **System** | Kernel-level Memory Pressure monitor, top RAM consumers, 1-click Quit/Purge, & local dev ports |
 
 ## Notch States
 
 - **Idle** — Flush with the hardware notch (`196 × 32 pt`) or tucked cleanly at the top edge on external displays.
-- **Compact Live Activity** — Symmetrical wings around the camera (`360–388 × 34 pt`) for Music, Dev Build progress, Pomodoro timer, AI status, or RAM alerts.
+- **Compact Live Activity** — Symmetrical wings around the camera (`360–388 × 34 pt`) for Music, Pomodoro timer, meeting reminders, AI status, or RAM alerts.
 - **Expanded Hub** — Full interactive workspace (`560 × 228 pt` below camera clearance) with concave top ears and spring physics.
-
-## CLI Preview (Phase 3)
-
-Report build progress, test runs, or deployment status directly into the Compact Notch from any terminal or script:
-
-```bash
-floqy live "swift build -c release" --progress 68
-floqy done "Floqy.app build finished in 3.2s"
-```
 
 ## Permissions
 
@@ -79,7 +70,7 @@ open build/Floqy.app
 - [x] **Phase 0** — Repository setup, Core Notch Engine (`NSScreen` geometry, `NSPanel`, concave ears, spring states), global shortcut (`⌘⇧Space`), menu bar & Settings shell
 - [x] **Phase 1** — Daily Flow Core (`Home`: Spotify/Apple Music, EventKit Calendar, Pomodoro & Todo)
 - [x] **Phase 2** — Productivity Power Tools (`Files` Smart Tray, `Notes → Obsidian`, `Copy` Clipboard Manager)
-- [ ] **Phase 3** — Unified `System` Tab (Memory Monitor + Dev Live Activity + `floqy` CLI)
+- [x] **Phase 3** — Unified `System` Tab (Memory Monitor + Local Dev Ports)
 - [ ] **Phase 4** — AI Agent Integration (BYOK + Ollama + Cross-Module Context)
 - [ ] **Phase 5** — Polish, Launch at Login, multi-monitor & `.dmg` distribution
 

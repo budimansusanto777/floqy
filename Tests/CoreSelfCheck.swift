@@ -14,7 +14,8 @@ enum CoreSelfCheck {
         checkMonthGridLogic()
         checkProductivityToolsLogic()
         checkNotchEnhancementsLogic()
-        print("CoreSelfCheck: 10/10 checks passed.")
+        checkSystemLogic()
+        print("CoreSelfCheck: 11/11 checks passed.")
     }
 
     private static func checkNotchedScreenDetection() {
@@ -335,6 +336,80 @@ enum CoreSelfCheck {
             isMusicPlaying: false
         )
         precondition(resolvedPausedHidden == .idle, "Paused Pomodoro should return Idle when music is silent and toggle is OFF")
+    }
+
+    private static func checkSystemLogic() {
+        let gb: UInt64 = 1_073_741_824
+        let mb: UInt64 = 1_048_576
+        let snapNominal = MemorySnapshot(
+            totalBytes: 16 * gb,
+            appBytes: 6 * gb,
+            wiredBytes: 2 * gb,
+            compressedBytes: 1 * gb,
+            swapUsedBytes: 256 * mb,
+            freeBytes: 7 * gb
+        )
+        precondition(snapNominal.usedBytes == 9 * gb, "Used bytes sum mismatch")
+        precondition(snapNominal.usedPercent == 56, "Expected ~56% RAM usage, got \(snapNominal.usedPercent)")
+        precondition(snapNominal.pressureLevel == .nominal, "Expected nominal pressure")
+        precondition(MemorySnapshot.formatBytes(12 * gb) == "12.0 GB", "GB formatting mismatch")
+        precondition(MemorySnapshot.formatBytes(512 * mb) == "512 MB", "MB formatting mismatch")
+
+        let snapCritical = MemorySnapshot(
+            totalBytes: 16 * gb,
+            appBytes: 10 * gb,
+            wiredBytes: 3 * gb,
+            compressedBytes: 1 * gb,
+            swapUsedBytes: 2 * gb,
+            freeBytes: 2 * gb
+        )
+        precondition(snapCritical.usedPercent == 88, "Critical RAM percent mismatch")
+        precondition(snapCritical.pressureLevel == .critical, "Expected critical pressure >=85%")
+
+        let samplePS = """
+          120 512000 /System/Library/CoreServices/Finder.app/Contents/MacOS/Finder
+          450 2097152 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+          890 1048576 /Applications/Visual Studio Code.app/Contents/MacOS/Code Helper
+          999 409600 /Users/dev/build/Floqy.app/Contents/MacOS/Floqy
+        """
+        let consumers = SystemLogic.parseTopMemoryProcesses(psOutput: samplePS, limit: 5, selfPID: 999)
+        precondition(consumers.count == 2, "Protected/self processes must be filtered: got \(consumers.count)")
+        precondition(consumers[0].pid == 450 && consumers[0].name == "Google Chrome", "Top consumer mismatch")
+        precondition(consumers[0].residentBytes == 2 * gb, "Resident byte conversion mismatch")
+
+        let sampleLsof = """
+        p101
+        cnode
+        n*:3000
+        p102
+        cpostgres
+        n127.0.0.1:5432
+        p103
+        ccustom
+        n*:9099
+        p104
+        cother
+        n*:3000
+        p105
+        cephem
+        n*:55100
+        """
+        let ports = SystemLogic.parseListeningPorts(lsofOutput: sampleLsof, limit: 10)
+        precondition(ports.count == 3, "Duplicate and ephemeral ports must be filtered: got \(ports.count)")
+        precondition(ports[0].port == 3000 && ports[0].isHTTP, "Preferred dev port ordering/HTTP flag mismatch")
+        precondition(ports[1].port == 5432 && !ports[1].isHTTP, "Postgres port should not be flagged HTTP")
+        precondition(ports[2].port == 9099, "Fallback ascending port mismatch")
+
+        let resolvedMem = NotchMode.resolvedCollapsedMode(
+            activeAlert: nil,
+            hasMeetingHeadsUp: false,
+            pomodoroRunning: false,
+            pomodoroPaused: true,
+            showPausedPomodoroInNotch: true,
+            isMemoryAlertActive: true,
+            isMusicPlaying: true
+        )
+        precondition(resolvedMem == .compact(.memory), "High RAM alert must precede Music & paused Pomodoro")
     }
 }
 

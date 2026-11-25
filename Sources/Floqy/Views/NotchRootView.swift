@@ -112,6 +112,7 @@ struct NotchRootView: View {
                         manager: manager,
                         music: manager.music,
                         productivity: manager.productivity,
+                        system: manager.system,
                         activity: activity
                     )
                     .frame(width: activityCompactSize.width, height: activityCompactSize.height)

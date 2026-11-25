@@ -5,6 +5,7 @@ struct NotchCompactView: View {
     @ObservedObject var manager: NotchManager
     @ObservedObject var music: MusicService
     @ObservedObject var productivity: ProductivityService
+    @ObservedObject var system: SystemMonitorService
     let activity: CompactActivity
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -65,16 +66,6 @@ struct NotchCompactView: View {
                     .foregroundStyle(NotchColors.textPrimary)
                     .lineLimit(1)
             }
-        case .dev:
-            HStack(spacing: 6) {
-                Image(systemName: "hammer.fill")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(NotchColors.accentPrimary)
-                Text("swift build")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(NotchColors.textPrimary)
-                    .lineLimit(1)
-            }
         case .pomodoro:
             let ringColor = productivity.pomodoro.isRunning ? NotchColors.statusAlert : NotchColors.textSecondary
             HStack(spacing: 6) {
@@ -110,11 +101,12 @@ struct NotchCompactView: View {
                     .lineLimit(1)
             }
         case .memory:
+            let memColor = system.snapshot.pressureLevel == .critical ? NotchColors.statusAlert : NotchColors.statusWarning
             HStack(spacing: 6) {
                 Image(systemName: "memorychip")
                     .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(NotchColors.statusWarning)
-                Text("RAM Pressure")
+                    .foregroundStyle(memColor)
+                Text("RAM High")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(NotchColors.textPrimary)
                     .lineLimit(1)
@@ -193,10 +185,6 @@ struct NotchCompactView: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Capsule().fill(NotchColors.statusWarning.opacity(0.16)))
-        case .dev:
-            Text("68%")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(NotchColors.accentPrimary)
         case .pomodoro:
             Text(productivity.pomodoro.formattedTime)
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
@@ -209,9 +197,10 @@ struct NotchCompactView: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(NotchColors.statusHealthy)
         case .memory:
-            Text("77%")
+            let memColor = system.snapshot.pressureLevel == .critical ? NotchColors.statusAlert : NotchColors.statusWarning
+            Text("\(system.snapshot.usedPercent)%")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(NotchColors.statusWarning)
+                .foregroundStyle(memColor)
         }
     }
 }

@@ -34,6 +34,7 @@ enum NotchMode: Equatable, Hashable {
         pomodoroRunning: Bool,
         pomodoroPaused: Bool,
         showPausedPomodoroInNotch: Bool,
+        isMemoryAlertActive: Bool = false,
         isMusicPlaying: Bool
     ) -> NotchMode {
         if let activeAlert {
@@ -44,6 +45,9 @@ enum NotchMode: Equatable, Hashable {
         }
         if pomodoroRunning {
             return .compact(.pomodoro)
+        }
+        if isMemoryAlertActive {
+            return .compact(.memory)
         }
         if isMusicPlaying {
             return .compact(.music)
@@ -59,7 +63,6 @@ enum NotchMode: Equatable, Hashable {
 enum CompactActivity: String, CaseIterable, Identifiable, Hashable {
     case music
     case meeting
-    case dev
     case pomodoro
     case ai
     case memory
@@ -70,7 +73,6 @@ enum CompactActivity: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .music: return "Music"
         case .meeting: return "Meeting"
-        case .dev: return "Dev Build"
         case .pomodoro: return "Pomodoro"
         case .ai: return "AI Agent"
         case .memory: return "Memory"

@@ -114,6 +114,10 @@ struct SettingsView: View {
                 Toggle("Show paused timer in notch", isOn: $manager.showPausedPomodoroInNotch)
             }
 
+            Section("System") {
+                Toggle("Alert when RAM exceeds \(SystemLogic.ramAlertThresholdPercent)%", isOn: $manager.ramAlertEnabled)
+            }
+
             Section("Display Geometry") {
                 LabeledContent("Hardware Notch") {
                     Text(manager.geometry.hasHardwareNotch ? "Detected" : "Fallback Mode")
@@ -127,13 +131,13 @@ struct SettingsView: View {
             }
 
             Section("About Floqy") {
-                LabeledContent("Version", value: "0.2.0 (Phase 2)")
+                LabeledContent("Version", value: "0.3.0 (Phase 3)")
                 LabeledContent("License", value: "GNU GPLv3")
                 LabeledContent("Copyright", value: "© 2026 budimansusanto777")
             }
         }
         .formStyle(.grouped)
-        .frame(width: 440, height: 520)
+        .frame(width: 440, height: 550)
     }
 
     private var eventKitStatusLabel: String {

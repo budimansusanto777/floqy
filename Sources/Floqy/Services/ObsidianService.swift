@@ -29,6 +29,8 @@ final class ObsidianService: ObservableObject {
     @Published private(set) var lastSavedSummary: String?
     @Published private(set) var lastError: String?
 
+    private var feedbackClearTask: Task<Void, Never>?
+
     var isVaultConfigured: Bool {
         vaultName != nil && UserDefaults.standard.data(forKey: Self.bookmarkKey) != nil
     }
@@ -86,9 +88,14 @@ final class ObsidianService: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Self.bookmarkKey)
         UserDefaults.standard.removeObject(forKey: Self.vaultNameKey)
         vaultName = nil
+        clearTransientFeedback()
+        loadRecentNotes()
+    }
+
+    func clearTransientFeedback() {
+        feedbackClearTask?.cancel()
         lastSavedSummary = nil
         lastError = nil
-        loadRecentNotes()
     }
 
     func openActiveNotesFolder() {
@@ -152,6 +159,12 @@ final class ObsidianService: ObservableObject {
 
             lastError = nil
             lastSavedSummary = "Saved to \(relativePath)"
+            feedbackClearTask?.cancel()
+            feedbackClearTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(2.5))
+                guard !Task.isCancelled else { return }
+                self?.lastSavedSummary = nil
+            }
             loadRecentNotes()
             return true
         } catch {
