@@ -10,20 +10,14 @@ struct NotchIdleView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @StateObject private var pointerTracker = IdlePointerTracker()
+    @StateObject private var calicoDriver = CalicoWalkDriver()
     @State private var isBlinking = false
     @State private var isHappyMood = false
     @State private var gazeOffset: CGSize = .zero
-    @State private var petTailAngle: Double = 0
     @State private var petBlink = false
-    @State private var petHopOffset: CGFloat = 0
-    @State private var petHeadTilt: Double = 0
-    @State private var petEyeOffsetX: CGFloat = 0
-    @State private var dogFacingLeft = false
     @State private var isPointerActive = false
     @State private var horizonExpanded = false
     @State private var pointerSettleTask: Task<Void, Never>?
-    @State private var petBurstTask: Task<Void, Never>?
-    @State private var lastPetWakeTime: CFTimeInterval = 0
 
     private var tracksPointerMotion: Bool {
         guard !reduceMotion else { return false }
@@ -54,6 +48,15 @@ struct NotchIdleView: View {
         Group {
             if manager.idleAppearance == .off {
                 Color.clear
+            } else if manager.idleAppearance == .cat {
+                let cameraWidth = manager.geometry.hasHardwareNotch
+                    ? manager.geometry.hardwareNotchSize.width
+                    : 196
+                let totalWidth = cameraWidth + NotchGeometry.sideWingSlotWidth * 2
+                let height = manager.geometry.hasHardwareNotch
+                    ? manager.geometry.hardwareNotchSize.height
+                    : 34
+                calicoTunnelStage(totalWidth: totalWidth, cameraWidth: cameraWidth, height: height)
             } else if manager.idleAppearance.isSideWing {
                 let cameraWidth = manager.geometry.hasHardwareNotch
                     ? manager.geometry.hardwareNotchSize.width
@@ -94,20 +97,25 @@ struct NotchIdleView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
         .onAppear {
+            syncCalicoBounds()
             configurePointerTracking()
         }
         .onChange(of: manager.idleAppearance) { _, _ in
+            syncCalicoBounds()
             configurePointerTracking()
         }
+        .onChange(of: manager.geometry) { _, _ in
+            syncCalicoBounds()
+        }
         .onChange(of: reduceMotion) { _, _ in
+            syncCalicoBounds()
             configurePointerTracking()
         }
         .onDisappear {
             pointerTracker.setActive(false)
+            calicoDriver.stop()
             pointerSettleTask?.cancel()
             pointerSettleTask = nil
-            petBurstTask?.cancel()
-            petBurstTask = nil
             isPointerActive = false
             gazeOffset = .zero
             resetPetStates()
@@ -128,20 +136,16 @@ struct NotchIdleView: View {
         case .eyes:
             eyesContent
         case .cat:
-            MiniCatCompanion(
-                tailAngle: reduceMotion ? 0 : petTailAngle,
-                blink: !reduceMotion && petBlink,
-                headTilt: reduceMotion ? 0 : petHeadTilt,
-                eyeOffsetX: reduceMotion ? 0 : petEyeOffsetX,
-                hopOffset: reduceMotion ? 0 : petHopOffset
-            )
+            EmptyView()
         case .dog:
-            MiniDogCompanion(
-                tailAngle: reduceMotion ? 0 : petTailAngle,
-                blink: !reduceMotion && petBlink,
-                headTilt: reduceMotion ? 0 : petHeadTilt,
-                hopOffset: reduceMotion ? 0 : petHopOffset,
-                facingLeft: !reduceMotion && dogFacingLeft
+            FloqyPoodleMascotView(
+                mode: .idle,
+                width: 34,
+                gazeOffset: reduceMotion ? .zero : gazeOffset,
+                isBlinking: !reduceMotion && petBlink,
+                isHappy: isHappyMood,
+                showSparks: isHappyMood,
+                isCelebrating: isHappyMood
             )
         case .wave:
             acousticWaveContent
@@ -212,13 +216,56 @@ struct NotchIdleView: View {
         .animation(.easeInOut(duration: 0.18), value: isPointerActive)
     }
 
+    private func calicoTunnelStage(totalWidth: CGFloat, cameraWidth: CGFloat, height: CGFloat) -> some View {
+        let catWidth: CGFloat = 32
+        let isSitting = reduceMotion ? true : calicoDriver.isSitting
+        return ZStack(alignment: .bottomLeading) {
+            ZStack {
+                FloqyCalicoMascotView(
+                    mode: .sitting,
+                    width: catWidth,
+                    isBlinking: !reduceMotion && petBlink,
+                    isHappy: isHappyMood,
+                    showSparks: isHappyMood,
+                    isCelebrating: isHappyMood
+                )
+                .opacity(isSitting ? 1 : 0)
+                .offset(y: isSitting ? 0 : 2)
+
+                FloqyCalicoMascotView(
+                    mode: .walking(phase: calicoDriver.walkPhase, strideFactor: calicoDriver.strideFactor),
+                    width: catWidth
+                )
+                .opacity(isSitting ? 0 : 1)
+                .offset(y: isSitting ? 2 : 0)
+            }
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: isSitting)
+            .scaleEffect(x: reduceMotion ? 1 : calicoDriver.facingScaleX, y: 1, anchor: .center)
+            .offset(x: calicoDriver.x, y: -2)
+
+            // Occlude the center camera region so Calico walks cleanly behind the physical bezel.
+            Color.black
+                .frame(width: cameraWidth, height: height)
+                .frame(width: totalWidth, height: height, alignment: .center)
+                .allowsHitTesting(false)
+        }
+        .frame(width: totalWidth, height: height, alignment: .bottomLeading)
+        .clipped()
+    }
+
+    private func syncCalicoBounds() {
+        let cameraWidth = manager.geometry.hasHardwareNotch
+            ? manager.geometry.hardwareNotchSize.width
+            : 196
+        let totalWidth = cameraWidth + NotchGeometry.sideWingSlotWidth * 2
+        calicoDriver.configureBounds(totalWidth: totalWidth, cameraWidth: cameraWidth, catWidth: 32)
+        if manager.idleAppearance != .cat || reduceMotion {
+            calicoDriver.stop(snapToRest: reduceMotion)
+        }
+    }
+
     private func resetPetStates() {
-        petTailAngle = 0
         petBlink = false
-        petHopOffset = 0
-        petHeadTilt = 0
-        petEyeOffsetX = 0
-        dogFacingLeft = false
     }
 
     private func configurePointerTracking() {
@@ -269,48 +316,23 @@ struct NotchIdleView: View {
             }
 
         case .cat:
-            let eyeDx = max(-1.2, min(1.2, ((screenPoint.x - screen.midX) / halfW) * 1.2))
-            withAnimation(.easeOut(duration: 0.16)) {
-                petEyeOffsetX = eyeDx
+            let normalizedX = max(0, min(1, (screenPoint.x - screen.minX) / max(1, screen.width)))
+            calicoDriver.updateTarget(normalizedScreenX: normalizedX)
+
+        case .dog:
+            let height = max(1, screen.height)
+            let dx = max(-2.1, min(2.1, ((screenPoint.x - screen.midX) / halfW) * 2.1))
+            let dy = max(-1.0, min(1.6, ((screen.maxY - screenPoint.y) / height) * 1.4))
+            withAnimation(.easeOut(duration: 0.14)) {
+                gazeOffset = CGSize(width: dx, height: dy)
             }
             pointerSettleTask?.cancel()
             pointerSettleTask = Task {
                 try? await Task.sleep(for: .seconds(1.8))
                 guard !Task.isCancelled else { return }
-                withAnimation(.easeOut(duration: 0.28)) {
-                    petEyeOffsetX = 0
+                withAnimation(.easeOut(duration: 0.3)) {
+                    gazeOffset = .zero
                 }
-            }
-
-            let now = CACurrentMediaTime()
-            guard now - lastPetWakeTime >= 1.4, petBurstTask == nil else { return }
-            lastPetWakeTime = now
-            petBurstTask = Task {
-                await triggerCatPlayfulReaction()
-                petBurstTask = nil
-            }
-
-        case .dog:
-            var turned = false
-            if screenPoint.x < screen.midX - 80, !dogFacingLeft {
-                withAnimation(.easeInOut(duration: 0.22)) {
-                    dogFacingLeft = true
-                }
-                turned = true
-            } else if screenPoint.x > screen.midX + 80, dogFacingLeft {
-                withAnimation(.easeInOut(duration: 0.22)) {
-                    dogFacingLeft = false
-                }
-                turned = true
-            }
-
-            let now = CACurrentMediaTime()
-            guard turned || (now - lastPetWakeTime >= 1.4 && petBurstTask == nil) else { return }
-            lastPetWakeTime = now
-            petBurstTask?.cancel()
-            petBurstTask = Task {
-                await triggerDogHappyReaction()
-                petBurstTask = nil
             }
 
         case .off, .horizon:
@@ -346,61 +368,13 @@ struct NotchIdleView: View {
         }
     }
 
-    private func triggerCatPlayfulReaction() async {
-        withAnimation(.easeInOut(duration: 0.22)) {
-            petTailAngle = 24
-            petHeadTilt = 5.5
-            petHopOffset = -0.8
-        }
-        try? await Task.sleep(for: .milliseconds(220))
-        guard !Task.isCancelled else { return }
-        withAnimation(.easeInOut(duration: 0.28)) {
-            petTailAngle = -14
-            petHeadTilt = -4.5
-            petHopOffset = 0
-        }
-        try? await Task.sleep(for: .milliseconds(280))
-        guard !Task.isCancelled else { return }
-        withAnimation(.easeOut(duration: 0.24)) {
-            petTailAngle = 0
-            petHeadTilt = 0
-        }
-    }
-
-    private func triggerDogHappyReaction() async {
-        withAnimation(.spring(response: 0.22, dampingFraction: 0.65)) {
-            petHopOffset = -1.6
-            petHeadTilt = 4
-        }
-        for _ in 0..<3 {
-            withAnimation(.easeInOut(duration: 0.08)) {
-                petTailAngle = 28
-            }
-            try? await Task.sleep(for: .milliseconds(80))
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.08)) {
-                petTailAngle = -24
-            }
-            try? await Task.sleep(for: .milliseconds(80))
-            guard !Task.isCancelled else { return }
-        }
-        withAnimation(.easeOut(duration: 0.16)) {
-            petTailAngle = 0
-            petHopOffset = 0
-            petHeadTilt = 0
-        }
-    }
-
     private func runIdleAnimationLoop() async {
-        petBurstTask?.cancel()
-        petBurstTask = nil
         isBlinking = false
         resetPetStates()
         horizonExpanded = false
 
         guard !reduceMotion else { return }
 
-        var beat = 0
         switch manager.idleAppearance {
         case .off, .wave:
             return
@@ -419,25 +393,17 @@ struct NotchIdleView: View {
             }
         case .cat:
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2.4))
+                try? await Task.sleep(for: .seconds(3.2))
                 guard !Task.isCancelled else { break }
-                beat += 1
-                if beat.isMultiple(of: 2) {
+                if calicoDriver.isSitting {
                     await performPetBlink(durationMs: 120)
-                } else if petBurstTask == nil {
-                    await triggerCatPlayfulReaction()
                 }
             }
         case .dog:
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2.2))
+                try? await Task.sleep(for: .seconds(3.3))
                 guard !Task.isCancelled else { break }
-                beat += 1
-                if beat.isMultiple(of: 2) {
-                    await performPetBlink(durationMs: 110)
-                } else if petBurstTask == nil {
-                    await triggerDogHappyReaction()
-                }
+                await performPetBlink(durationMs: 120)
             }
         case .horizon:
             while !Task.isCancelled {
@@ -516,178 +482,670 @@ private struct HappyEyeArcShape: Shape {
     }
 }
 
-private struct MiniCatCompanion: View {
-    let tailAngle: Double
-    let blink: Bool
-    let headTilt: Double
-    let eyeOffsetX: CGFloat
-    let hopOffset: CGFloat
+/// Drives smooth inertial walking behind the camera cutout and curls into a sitting loaf when the mouse settles.
+@MainActor
+private final class CalicoWalkDriver: ObservableObject {
+    @Published private(set) var x: CGFloat = 0
+    @Published private(set) var walkPhase: CGFloat = 0
+    @Published private(set) var strideFactor: CGFloat = 0
+    @Published private(set) var facingScaleX: CGFloat = 1
+    @Published private(set) var isSitting: Bool = true
 
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            // Curled tail extending to the right from the sitting base
-            CatTailShape()
-                .stroke(
-                    NotchColors.textPrimary,
-                    style: StrokeStyle(lineWidth: 2.1, lineCap: .round)
-                )
-                .frame(width: 28, height: 15)
-                .rotationEffect(.degrees(tailAngle), anchor: UnitPoint(x: 0.64, y: 0.85))
+    private var timer: Timer?
+    private var hasConfigured = false
+    private var leftRange: ClosedRange<CGFloat> = 15...21
+    private var rightRange: ClosedRange<CGFloat> = 259...265
+    private var tunnelSpan: ClosedRange<CGFloat> = 52...228
+    private var targetWingIsLeft = false
+    private var targetX: CGFloat = 262
+    private var vx: CGFloat = 0
+    private var facingLeft = false
+    private var stillTime: TimeInterval = 0
+    private var lastStepTime: CFTimeInterval = 0
 
-            CatBodyShape()
-                .fill(NotchColors.textPrimary)
-                .frame(width: 28, height: 15)
+    deinit {
+        timer?.invalidate()
+    }
 
-            // Crisp eyes that follow cursor horizontally and blink periodically
-            HStack(spacing: 2.5) {
-                Circle()
-                    .fill(NotchColors.petAccentCutout)
-                    .frame(width: 1.8, height: 1.8)
-                    .scaleEffect(y: blink ? 0.2 : 1.0, anchor: .center)
-                Circle()
-                    .fill(NotchColors.petAccentCutout)
-                    .frame(width: 1.8, height: 1.8)
-                    .scaleEffect(y: blink ? 0.2 : 1.0, anchor: .center)
+    func configureBounds(totalWidth: CGFloat, cameraWidth: CGFloat, catWidth: CGFloat) {
+        let ear = NotchGeometry.earWidth
+        let wing = NotchGeometry.sideWingWidth
+        let leftMin = ear + 3
+        let leftMax = max(leftMin, ear + wing - catWidth - 3)
+        let rightMin = totalWidth - ear - wing + 3
+        let rightMax = max(rightMin, totalWidth - ear - catWidth - 3)
+        let tStart = ear + wing - 4
+        let tEnd = max(tStart, totalWidth - ear - wing - catWidth + 4)
+
+        leftRange = leftMin...leftMax
+        rightRange = rightMin...rightMax
+        tunnelSpan = tStart...tEnd
+
+        let restingRight = (rightMin + rightMax) / 2
+        if !hasConfigured {
+            hasConfigured = true
+            x = restingRight
+            targetX = restingRight
+            targetWingIsLeft = false
+            facingScaleX = 1
+        } else {
+            x = targetWingIsLeft ? min(max(x, leftMin), leftMax) : min(max(x, rightMin), rightMax)
+            targetX = targetWingIsLeft ? (leftMin + leftMax) / 2 : restingRight
+        }
+        _ = cameraWidth
+    }
+
+    func updateTarget(normalizedScreenX: CGFloat) {
+        if normalizedScreenX < 0.45 {
+            targetWingIsLeft = true
+            let t = normalizedScreenX / 0.45
+            targetX = leftRange.lowerBound + t * (leftRange.upperBound - leftRange.lowerBound)
+        } else if normalizedScreenX > 0.55 {
+            targetWingIsLeft = false
+            let t = (normalizedScreenX - 0.55) / 0.45
+            targetX = rightRange.lowerBound + t * (rightRange.upperBound - rightRange.lowerBound)
+        }
+
+        let diff = targetX - x
+        if isSitting && abs(diff) > 6 {
+            isSitting = false
+            stillTime = 0
+            startTimerIfNeeded()
+        }
+    }
+
+    func stop(snapToRest: Bool = false) {
+        timer?.invalidate()
+        timer = nil
+        vx = 0
+        strideFactor = 0
+        stillTime = 0
+        if snapToRest {
+            isSitting = true
+            x = targetWingIsLeft ? (leftRange.lowerBound + leftRange.upperBound) / 2 : (rightRange.lowerBound + rightRange.upperBound) / 2
+            facingScaleX = targetWingIsLeft ? -1 : 1
+        }
+    }
+
+    private func startTimerIfNeeded() {
+        guard timer == nil else { return }
+        lastStepTime = CACurrentMediaTime()
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.step()
             }
-            .offset(x: 10.6 + eyeOffsetX, y: 4.9)
         }
-        .frame(width: 28, height: 15)
-        .rotationEffect(.degrees(headTilt), anchor: .bottom)
-        .offset(y: hopOffset)
+    }
+
+    private func step() {
+        let now = CACurrentMediaTime()
+        let dt = CGFloat(min(0.05, max(0.001, now - lastStepTime)))
+        lastStepTime = now
+
+        let diff = targetX - x
+        let inTunnel = x > tunnelSpan.lowerBound && x < tunnelSpan.upperBound
+        let maxSpeed: CGFloat = inTunnel ? 220 : 48
+        let gain: CGFloat = inTunnel ? 4.2 : 2.5
+
+        let desiredVx: CGFloat = abs(diff) > 1.2
+            ? max(-maxSpeed, min(maxSpeed, diff * gain))
+            : 0
+        vx += (desiredVx - vx) * min(1, dt * 8.5)
+        x += vx * dt
+
+        walkPhase += abs(vx) * dt * 0.28
+        strideFactor = min(1, abs(vx) / 20)
+
+        if abs(diff) > 3.0 {
+            facingLeft = diff < 0
+        }
+        let desiredScale: CGFloat = facingLeft ? -1 : 1
+        facingScaleX += (desiredScale - facingScaleX) * min(1, dt * 14)
+
+        if !inTunnel && abs(diff) <= 2.2 && abs(vx) < 4.5 {
+            stillTime += TimeInterval(dt)
+            if stillTime >= 0.50 {
+                vx = 0
+                strideFactor = 0
+                stillTime = 0
+                facingScaleX = targetWingIsLeft ? -1 : 1
+                isSitting = true
+                timer?.invalidate()
+                timer = nil
+            }
+        } else {
+            stillTime = 0
+        }
     }
 }
 
-private struct CatBodyShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let sx = rect.width / 28
-        let sy = rect.height / 15
-        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * sx, y: y * sy) }
-
-        var path = Path()
-        // Sitting silhouette: rounded haunches + neck + head with two pointed ears
-        path.move(to: p(8.2, 14.2))
-        path.addQuadCurve(to: p(8.9, 8.8), control: p(7.7, 11.2))
-        path.addLine(to: p(8.9, 5.2))
-        path.addLine(to: p(8.6, 1.4))
-        path.addLine(to: p(11.8, 3.2))
-        path.addQuadCurve(to: p(15.2, 3.2), control: p(13.5, 2.7))
-        path.addLine(to: p(18.4, 1.4))
-        path.addLine(to: p(18.1, 5.2))
-        path.addQuadCurve(to: p(16.9, 8.2), control: p(18.4, 7.2))
-        path.addQuadCurve(to: p(18.2, 14.2), control: p(18.7, 11.6))
-        path.addLine(to: p(8.2, 14.2))
-        path.closeSubpath()
-        return path
-    }
+enum CalicoMascotMode: Equatable {
+    case sitting
+    case walking(phase: CGFloat, strideFactor: CGFloat)
+    case working
+    case done
 }
 
-private struct CatTailShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let sx = rect.width / 28
-        let sy = rect.height / 15
-        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * sx, y: y * sy) }
+/// Colored Calico Cat vector mascot across sitting loaf, camera-tunnel walk, brisk Working, and Done celebration.
+struct FloqyCalicoMascotView: View {
+    let mode: CalicoMascotMode
+    let width: CGFloat
+    var isBlinking: Bool = false
+    var isHappy: Bool = false
+    var showSparks: Bool = false
+    var isCelebrating: Bool = false
 
-        var path = Path()
-        path.move(to: p(17.3, 13.0))
-        path.addCurve(to: p(24.8, 6.2), control1: p(21.8, 13.0), control2: p(25.2, 10.2))
-        return path
-    }
-}
-
-private struct MiniDogCompanion: View {
-    let tailAngle: Double
-    let blink: Bool
-    let headTilt: Double
-    let hopOffset: CGFloat
-    let facingLeft: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            DogTailShape()
-                .stroke(
-                    NotchColors.textPrimary,
-                    style: StrokeStyle(lineWidth: 2.1, lineCap: .round)
-                )
-                .frame(width: 30, height: 15)
-                .rotationEffect(.degrees(tailAngle), anchor: UnitPoint(x: 0.25, y: 0.68))
+        let height = round(width * 0.72)
+        let animateLoop = mode == .working && !reduceMotion
+        let hopY: CGFloat = (mode == .done && !reduceMotion && !isCelebrating) ? 4 : 0
+        let hopScale: CGFloat = (mode == .done && !reduceMotion && !isCelebrating) ? 0.9 : 1.0
 
-            DogBodyShape()
-                .fill(NotchColors.textPrimary)
-                .frame(width: 30, height: 15)
-
-            // Contrasting separator defining the floppy ear against the puppy silhouette
-            DogEarOutlineShape()
-                .stroke(
-                    NotchColors.petAccentCutout,
-                    style: StrokeStyle(lineWidth: 1.0, lineCap: .round, lineJoin: .round)
-                )
-                .frame(width: 30, height: 15)
-
-            // Eye and nose accents
-            Circle()
-                .fill(NotchColors.petAccentCutout)
-                .frame(width: 1.8, height: 1.8)
-                .scaleEffect(y: blink ? 0.2 : 1.0, anchor: .center)
-                .offset(x: 19.0, y: 4.1)
-
-            Circle()
-                .fill(NotchColors.petAccentCutout)
-                .frame(width: 1.9, height: 1.9)
-                .offset(x: 24.4, y: 5.1)
+        TimelineView(.animation(paused: !animateLoop)) { context in
+            let t = animateLoop ? context.date.timeIntervalSinceReferenceDate : 0
+            Canvas { ctx, canvasSize in
+                drawCalico(in: &ctx, size: canvasSize, time: t)
+            }
         }
-        .frame(width: 30, height: 15)
-        .rotationEffect(.degrees(headTilt), anchor: .bottom)
-        .scaleEffect(x: facingLeft ? -1 : 1, y: 1, anchor: .center)
-        .offset(y: hopOffset)
+        .frame(width: width, height: height)
+        .scaleEffect(hopScale, anchor: .bottom)
+        .offset(y: hopY)
+        .accessibilityHidden(true)
+    }
+
+    private func drawCalico(in context: inout GraphicsContext, size: CGSize, time: TimeInterval) {
+        let sx = size.width / 64.0
+        let sy = size.height / 46.0
+
+        func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: x * sx, y: y * sy)
+        }
+
+        func fillRect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, angleDeg: CGFloat, anchor: CGPoint, color: Color) {
+            var local = context
+            local.translateBy(x: anchor.x * sx, y: anchor.y * sy)
+            local.rotate(by: .degrees(angleDeg))
+            local.translateBy(x: -anchor.x * sx, y: -anchor.y * sy)
+            let rect = CGRect(x: x * sx, y: y * sy, width: w * sx, height: h * sy)
+            local.fill(Path(roundedRect: rect, cornerRadius: (w / 2) * sx), with: .color(color))
+        }
+
+        let cream = Color(red: 255 / 255, green: 245 / 255, blue: 232 / 255)
+        let creamShadow = Color(red: 216 / 255, green: 198 / 255, blue: 176 / 255)
+        let orange = Color(red: 238 / 255, green: 134 / 255, blue: 54 / 255)
+        let orangeDeep = Color(red: 201 / 255, green: 105 / 255, blue: 32 / 255)
+        let cocoa = Color(red: 59 / 255, green: 40 / 255, blue: 30 / 255)
+        let earPink = Color(red: 244 / 255, green: 153 / 255, blue: 175 / 255)
+        let nosePink = Color(red: 240 / 255, green: 124 / 255, blue: 149 / 255)
+        let inkDark = Color(red: 38 / 255, green: 20 / 255, blue: 9 / 255)
+
+        if showSparks {
+            drawSparks(in: &context, sx: sx, sy: sy, isWorking: mode == .working && !reduceMotion, time: time)
+        }
+
+        switch mode {
+        case .walking(let phase, let strideFactor):
+            let swingA = CGFloat(sin(phase)) * 22 * strideFactor
+            let swingB = CGFloat(sin(phase + .pi)) * 22 * strideFactor
+            let bounceY: CGFloat = CGFloat(-abs(sin(phase))) * 1.15 * strideFactor
+            let tailDeg = CGFloat(sin(phase * 1.05 + 0.6)) * 9 * (0.35 + 0.65 * strideFactor)
+
+            var tail = Path()
+            tail.move(to: pt(15, 25 + bounceY))
+            tail.addCurve(to: pt(11, 9 + bounceY), control1: pt(8, 22 + bounceY), control2: pt(6, 12 + bounceY))
+            var tailCtx = context
+            tailCtx.translateBy(x: 15 * sx, y: (25 + bounceY) * sy)
+            tailCtx.rotate(by: .degrees(tailDeg))
+            tailCtx.translateBy(x: -15 * sx, y: -(25 + bounceY) * sy)
+            tailCtx.stroke(tail, with: .color(orange), style: StrokeStyle(lineWidth: 4.2 * sx, lineCap: .round))
+            tailCtx.fill(Path(ellipseIn: CGRect(x: 9.0 * sx, y: (6.8 + bounceY) * sy, width: 4.4 * sx, height: 4.4 * sy)), with: .color(cocoa))
+
+            // Far legs
+            fillRect(18, 31 + bounceY, 4.4, 12, angleDeg: swingB, anchor: CGPoint(x: 20, y: 31 + bounceY), color: creamShadow)
+            fillRect(38, 31 + bounceY, 4.4, 12, angleDeg: swingA, anchor: CGPoint(x: 40, y: 31 + bounceY), color: orangeDeep)
+
+            // Torso + patches
+            context.fill(Path(ellipseIn: CGRect(x: 14.5 * sx, y: (19.7 + bounceY) * sy, width: 29 * sx, height: 15.6 * sy)), with: .color(cream))
+            var rump = Path()
+            rump.move(to: pt(16, 24.5 + bounceY))
+            rump.addCurve(to: pt(29.5, 25.5 + bounceY), control1: pt(20, 19.8 + bounceY), control2: pt(27, 20.5 + bounceY))
+            rump.addCurve(to: pt(16, 24.5 + bounceY), control1: pt(25, 27.5 + bounceY), control2: pt(20, 27.5 + bounceY))
+            context.fill(rump, with: .color(cocoa))
+
+            var shoulder = Path()
+            shoulder.move(to: pt(27.5, 21.0 + bounceY))
+            shoulder.addCurve(to: pt(41.0, 27.0 + bounceY), control1: pt(33.5, 19.8 + bounceY), control2: pt(39.5, 22.0 + bounceY))
+            shoulder.addCurve(to: pt(27.5, 21.0 + bounceY), control1: pt(36.5, 28.5 + bounceY), control2: pt(31.5, 27.5 + bounceY))
+            context.fill(shoulder, with: .color(orange))
+
+            // Near legs
+            fillRect(21, 31.5 + bounceY, 4.8, 12, angleDeg: swingA, anchor: CGPoint(x: 23, y: 31.5 + bounceY), color: cocoa)
+            fillRect(35, 31.5 + bounceY, 4.8, 12, angleDeg: swingB, anchor: CGPoint(x: 37, y: 31.5 + bounceY), color: cream)
+
+            // Ears + forward head
+            var lEar = Path()
+            lEar.move(to: pt(35, 14 + bounceY))
+            lEar.addLine(to: pt(34.5, 4 + bounceY))
+            lEar.addLine(to: pt(42, 10 + bounceY))
+            lEar.closeSubpath()
+            context.fill(lEar, with: .color(cocoa))
+
+            var rEar = Path()
+            rEar.move(to: pt(46, 14 + bounceY))
+            rEar.addLine(to: pt(49.5, 3.6 + bounceY))
+            rEar.addLine(to: pt(52, 13 + bounceY))
+            rEar.closeSubpath()
+            context.fill(rEar, with: .color(orange))
+
+            var rEarIn = Path()
+            rEarIn.move(to: pt(47.2, 12.6 + bounceY))
+            rEarIn.addLine(to: pt(49.0, 6.2 + bounceY))
+            rEarIn.addLine(to: pt(50.8, 11.8 + bounceY))
+            rEarIn.closeSubpath()
+            context.fill(rEarIn, with: .color(earPink))
+
+            context.fill(Path(ellipseIn: CGRect(x: 32.5 * sx, y: (8.4 + bounceY) * sy, width: 23 * sx, height: 19.6 * sy)), with: .color(cream))
+            var lPatch = Path()
+            lPatch.move(to: pt(34.5, 15.0 + bounceY))
+            lPatch.addCurve(to: pt(44.5, 13.5 + bounceY), control1: pt(36.2, 9.5 + bounceY), control2: pt(42.0, 9.0 + bounceY))
+            lPatch.addCurve(to: pt(34.5, 15.0 + bounceY), control1: pt(41.5, 16.0 + bounceY), control2: pt(37.5, 16.2 + bounceY))
+            context.fill(lPatch, with: .color(cocoa))
+
+            var rPatch = Path()
+            rPatch.move(to: pt(45.2, 13.0 + bounceY))
+            rPatch.addCurve(to: pt(54.2, 15.8 + bounceY), control1: pt(48.2, 9.2 + bounceY), control2: pt(53.5, 11.2 + bounceY))
+            rPatch.addCurve(to: pt(45.2, 13.0 + bounceY), control1: pt(51.0, 16.5 + bounceY), control2: pt(47.5, 15.8 + bounceY))
+            context.fill(rPatch, with: .color(orange))
+
+            context.fill(Path(ellipseIn: CGRect(x: 46.3 * sx, y: (15.6 + bounceY) * sy, width: 4.4 * sx, height: 4.4 * sy)), with: .color(inkDark))
+            context.fill(Path(ellipseIn: CGRect(x: 47.1 * sx, y: (16.2 + bounceY) * sy, width: 1.6 * sx, height: 1.6 * sy)), with: .color(.white))
+
+            var nose = Path()
+            nose.move(to: pt(52.8, 19.6 + bounceY))
+            nose.addLine(to: pt(55.6, 19.6 + bounceY))
+            nose.addLine(to: pt(54.4, 21.2 + bounceY))
+            nose.closeSubpath()
+            context.fill(nose, with: .color(nosePink))
+
+        case .sitting, .working:
+            let isWorking = mode == .working && !reduceMotion
+            let tailDeg: CGFloat = isWorking ? CGFloat(sin(time * 12.0)) * 14 : 0
+
+            // Loaf body + orange/cocoa back patches
+            context.fill(Path(ellipseIn: CGRect(x: 22 * sx, y: 25 * sy, width: 32 * sx, height: 19 * sy)), with: .color(cream))
+            var backOrange = Path()
+            backOrange.move(to: pt(30, 26.2))
+            backOrange.addCurve(to: pt(44.5, 33.5), control1: pt(36, 24.5), control2: pt(43, 26.5))
+            backOrange.addCurve(to: pt(30, 26.2), control1: pt(39, 34.5), control2: pt(34, 33))
+            context.fill(backOrange, with: .color(orange))
+
+            var backCocoa = Path()
+            backCocoa.move(to: pt(41.5, 27.2))
+            backCocoa.addCurve(to: pt(52, 38.5), control1: pt(48.5, 28), control2: pt(53.5, 33))
+            backCocoa.addCurve(to: pt(41.5, 27.2), control1: pt(46, 39), control2: pt(42, 35.5))
+            context.fill(backCocoa, with: .color(cocoa))
+
+            // Tail
+            var tail = Path()
+            tail.move(to: pt(52, 38.5))
+            tail.addCurve(to: pt(56.5, 26.5), control1: pt(58.5, 38.5), control2: pt(60, 31.5))
+            var tailCtx = context
+            tailCtx.translateBy(x: 50 * sx, y: 38 * sy)
+            tailCtx.rotate(by: .degrees(tailDeg))
+            tailCtx.translateBy(x: -50 * sx, y: -38 * sy)
+            tailCtx.stroke(tail, with: .color(orange), style: StrokeStyle(lineWidth: 4.2 * sx, lineCap: .round))
+            tailCtx.fill(Path(ellipseIn: CGRect(x: 54.2 * sx, y: 24.0 * sy, width: 4.4 * sx, height: 4.4 * sy)), with: .color(cocoa))
+
+            // Ears
+            var lEar = Path()
+            lEar.move(to: pt(11.5, 19.5))
+            lEar.addLine(to: pt(10.6, 6.6))
+            lEar.addLine(to: pt(20.5, 14.0))
+            lEar.closeSubpath()
+            context.fill(lEar, with: .color(orange))
+
+            var rEar = Path()
+            rEar.move(to: pt(36.5, 19.5))
+            rEar.addLine(to: pt(37.6, 6.6))
+            rEar.addLine(to: pt(27.5, 14.0))
+            rEar.closeSubpath()
+            context.fill(rEar, with: .color(cocoa))
+
+            for earPts in [
+                (CGPoint(x: 12.6, y: 17.4), CGPoint(x: 11.9, y: 9.6), CGPoint(x: 18.4, y: 14.6)),
+                (CGPoint(x: 35.4, y: 17.4), CGPoint(x: 36.2, y: 9.6), CGPoint(x: 29.6, y: 14.6))
+            ] {
+                var p = Path()
+                p.move(to: pt(earPts.0.x, earPts.0.y))
+                p.addLine(to: pt(earPts.1.x, earPts.1.y))
+                p.addLine(to: pt(earPts.2.x, earPts.2.y))
+                p.closeSubpath()
+                context.fill(p, with: .color(earPink.opacity(0.88)))
+            }
+
+            // Head + patches
+            context.fill(Path(ellipseIn: CGRect(x: 9.8 * sx, y: 13.2 * sy, width: 28.4 * sx, height: 23.2 * sy)), with: .color(cream))
+            var fhOrange = Path()
+            fhOrange.move(to: pt(11.2, 21.5))
+            fhOrange.addCurve(to: pt(23.0, 18.8), control1: pt(12.5, 14.2), control2: pt(19.5, 13.0))
+            fhOrange.addCurve(to: pt(11.2, 21.5), control1: pt(19.5, 21.5), control2: pt(14.5, 22.0))
+            context.fill(fhOrange, with: .color(orange))
+
+            var fhCocoa = Path()
+            fhCocoa.move(to: pt(36.8, 21.5))
+            fhCocoa.addCurve(to: pt(25.2, 18.5), control1: pt(35.5, 14.2), control2: pt(28.5, 13.0))
+            fhCocoa.addCurve(to: pt(36.8, 21.5), control1: pt(28.5, 21.2), control2: pt(33.5, 22.0))
+            context.fill(fhCocoa, with: .color(cocoa))
+
+            // Nose + smile
+            var nose = Path()
+            nose.move(to: pt(22.4, 26.8))
+            nose.addLine(to: pt(25.6, 26.8))
+            nose.addLine(to: pt(24.0, 28.4))
+            nose.closeSubpath()
+            context.fill(nose, with: .color(nosePink))
+
+            var mouth = Path()
+            mouth.move(to: pt(21.6, 29.3))
+            mouth.addQuadCurve(to: pt(24.0, 29.2), control: pt(22.8, 30.5))
+            mouth.addQuadCurve(to: pt(26.4, 29.3), control: pt(25.2, 30.5))
+            context.stroke(mouth, with: .color(cocoa), style: StrokeStyle(lineWidth: max(0.8, 1.15 * sx), lineCap: .round))
+
+            if isHappy {
+                for cx in [CGFloat(17.8), CGFloat(30.2)] {
+                    var arc = Path()
+                    arc.move(to: pt(cx - 2.6, 25.0))
+                    arc.addQuadCurve(to: pt(cx + 2.6, 25.0), control: pt(cx, 21.8))
+                    context.stroke(arc, with: .color(inkDark), style: StrokeStyle(lineWidth: max(1.2, 2.2 * sx), lineCap: .round))
+                }
+            } else {
+                let scaleY: CGFloat = isBlinking ? 0.14 : 1.0
+                for cx in [CGFloat(17.8), CGFloat(30.2)] {
+                    context.fill(Path(ellipseIn: CGRect(x: (cx - 2.4) * sx, y: (24.4 - 2.4 * scaleY) * sy, width: 4.8 * sx, height: 4.8 * scaleY * sy)), with: .color(inkDark))
+                    if !isBlinking {
+                        context.fill(Path(ellipseIn: CGRect(x: (cx - 1.55) * sx, y: 22.65 * sy, width: 1.7 * sx, height: 1.7 * sy)), with: .color(.white))
+                    }
+                }
+            }
+
+            // Tucked paws
+            context.fill(Path(ellipseIn: CGRect(x: 12.3 * sx, y: 37.6 * sy, width: 10.4 * sx, height: 6.4 * sy)), with: .color(cream))
+            context.fill(Path(ellipseIn: CGRect(x: 25.3 * sx, y: 37.6 * sy, width: 10.4 * sx, height: 6.4 * sy)), with: .color(orange))
+
+        case .done:
+            // Front-facing peeking Calico celebration pose matching the Poodle Done alert
+            var lEar = Path()
+            lEar.move(to: pt(15.2, 21.8))
+            lEar.addLine(to: pt(13.2, 6.2))
+            lEar.addLine(to: pt(25.8, 14.2))
+            lEar.closeSubpath()
+            context.fill(lEar, with: .color(orange))
+
+            var rEar = Path()
+            rEar.move(to: pt(48.8, 21.8))
+            rEar.addLine(to: pt(50.8, 6.2))
+            rEar.addLine(to: pt(38.2, 14.2))
+            rEar.closeSubpath()
+            context.fill(rEar, with: .color(cocoa))
+
+            for earPts in [
+                (CGPoint(x: 16.5, y: 19.2), CGPoint(x: 15.2, y: 9.6), CGPoint(x: 23.2, y: 15.0)),
+                (CGPoint(x: 47.5, y: 19.2), CGPoint(x: 48.8, y: 9.6), CGPoint(x: 40.8, y: 15.0))
+            ] {
+                var p = Path()
+                p.move(to: pt(earPts.0.x, earPts.0.y))
+                p.addLine(to: pt(earPts.1.x, earPts.1.y))
+                p.addLine(to: pt(earPts.2.x, earPts.2.y))
+                p.closeSubpath()
+                context.fill(p, with: .color(earPink.opacity(0.9)))
+            }
+
+            context.fill(Path(ellipseIn: CGRect(x: 14.2 * sx, y: 13.4 * sy, width: 35.6 * sx, height: 27.6 * sy)), with: .color(cream))
+
+            var leftFh = Path()
+            leftFh.move(to: pt(14.8, 23.8))
+            leftFh.addCurve(to: pt(30.8, 19.6), control1: pt(16.8, 14.5), control2: pt(26.2, 13.0))
+            leftFh.addCurve(to: pt(14.8, 23.8), control1: pt(26.2, 22.8), control2: pt(19.4, 23.8))
+            context.fill(leftFh, with: .color(orange))
+
+            var rightFh = Path()
+            rightFh.move(to: pt(49.2, 23.8))
+            rightFh.addCurve(to: pt(33.2, 19.6), control1: pt(47.2, 14.5), control2: pt(37.8, 13.0))
+            rightFh.addCurve(to: pt(49.2, 23.8), control1: pt(37.8, 22.8), control2: pt(44.6, 23.8))
+            context.fill(rightFh, with: .color(cocoa))
+
+            // Rosy cheeks
+            let blush = Color(red: 244 / 255, green: 139 / 255, blue: 139 / 255).opacity(0.48)
+            context.fill(Path(ellipseIn: CGRect(x: 15.3 * sx, y: 29.4 * sy, width: 5.8 * sx, height: 3.2 * sy)), with: .color(blush))
+            context.fill(Path(ellipseIn: CGRect(x: 42.9 * sx, y: 29.4 * sy, width: 5.8 * sx, height: 3.2 * sy)), with: .color(blush))
+
+            // Happy curved eyes (^ ^), pink nose & smile
+            for cx in [CGFloat(23.5), CGFloat(40.5)] {
+                var arc = Path()
+                arc.move(to: pt(cx - 3.0, 28.0))
+                arc.addQuadCurve(to: pt(cx + 3.0, 28.0), control: pt(cx, 24.2))
+                context.stroke(arc, with: .color(inkDark), style: StrokeStyle(lineWidth: max(1.4, 2.4 * sx), lineCap: .round))
+            }
+
+            var nose = Path()
+            nose.move(to: pt(29.8, 29.6))
+            nose.addLine(to: pt(34.2, 29.6))
+            nose.addLine(to: pt(32.0, 31.6))
+            nose.closeSubpath()
+            context.fill(nose, with: .color(nosePink))
+
+            var mouth = Path()
+            mouth.move(to: pt(28.8, 32.8))
+            mouth.addQuadCurve(to: pt(32.0, 32.6), control: pt(30.4, 34.2))
+            mouth.addQuadCurve(to: pt(35.2, 32.8), control: pt(33.6, 34.2))
+            context.stroke(mouth, with: .color(cocoa), style: StrokeStyle(lineWidth: max(0.9, 1.2 * sx), lineCap: .round))
+
+            // Raised happy rounded paws
+            let pawY: CGFloat = reduceMotion ? 0 : -3.2
+            context.fill(Path(ellipseIn: CGRect(x: 9.9 * sx, y: (36.4 + pawY) * sy, width: 13.2 * sx, height: 8.4 * sy)), with: .color(cream))
+            context.fill(Path(ellipseIn: CGRect(x: 12.1 * sx, y: (37.4 + pawY) * sy, width: 8.8 * sx, height: 5.2 * sy)), with: .color(earPink.opacity(0.55)))
+            context.fill(Path(ellipseIn: CGRect(x: 40.9 * sx, y: (36.4 + pawY) * sy, width: 13.2 * sx, height: 8.4 * sy)), with: .color(orange))
+            context.fill(Path(ellipseIn: CGRect(x: 43.1 * sx, y: (37.4 + pawY) * sy, width: 8.8 * sx, height: 5.2 * sy)), with: .color(cream.opacity(0.85)))
+        }
+    }
+
+    private func drawSparks(
+        in context: inout GraphicsContext,
+        sx: CGFloat,
+        sy: CGFloat,
+        isWorking: Bool,
+        time: TimeInterval
+    ) {
+        let sparkColor = Color(red: 245 / 255, green: 158 / 255, blue: 11 / 255)
+        let alphaA = isWorking ? (0.35 + 0.65 * ((sin(time * 6.0) + 1.0) * 0.5)) : ((mode == .done && !isCelebrating && !reduceMotion) ? 0.0 : 0.98)
+        let alphaB = isWorking ? (0.35 + 0.65 * ((sin(time * 6.0 + .pi) + 1.0) * 0.5)) : ((mode == .done && !isCelebrating && !reduceMotion) ? 0.0 : 0.98)
+
+        let specs: [(cx: CGFloat, cy: CGFloat, w: CGFloat, h: CGFloat, angleDeg: CGFloat, alpha: Double)] = [
+            (49.7, 8.2, 5.2, 11.2, 22, alphaA),
+            (57.0, 13.7, 4.8, 10.2, 42, alphaB)
+        ]
+        for spec in specs {
+            var local = context
+            local.opacity = spec.alpha
+            local.translateBy(x: spec.cx * sx, y: spec.cy * sy)
+            local.rotate(by: .degrees(spec.angleDeg))
+            let rect = CGRect(x: (-spec.w / 2) * sx, y: (-spec.h / 2) * sy, width: spec.w * sx, height: spec.h * sy)
+            local.fill(Path(roundedRect: rect, cornerRadius: (spec.w / 2) * sx), with: .color(sparkColor))
+        }
     }
 }
 
-private struct DogBodyShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let sx = rect.width / 30
-        let sy = rect.height / 15
-        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * sx, y: y * sy) }
-
-        var path = Path()
-        // Side-profile sitting puppy facing right with snout and chest
-        path.move(to: p(7.4, 14.0))
-        path.addQuadCurve(to: p(8.8, 8.6), control: p(6.8, 10.8))
-        path.addQuadCurve(to: p(14.0, 7.6), control: p(11.2, 7.6))
-        path.addQuadCurve(to: p(14.8, 2.2), control: p(13.4, 4.4))
-        path.addQuadCurve(to: p(21.0, 3.0), control: p(18.2, 1.2))
-        path.addLine(to: p(25.4, 4.4))
-        path.addQuadCurve(to: p(25.8, 7.2), control: p(26.8, 5.6))
-        path.addLine(to: p(22.0, 7.8))
-        path.addLine(to: p(20.9, 14.0))
-        path.closeSubpath()
-        return path
-    }
+enum PoodleMascotMode: Equatable {
+    case idle
+    case working
+    case done
 }
 
-private struct DogTailShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let sx = rect.width / 30
-        let sy = rect.height / 15
-        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * sx, y: y * sy) }
+/// Vector Floqy poodle mascot rendered from the AppIcon silhouette across Idle, Working, and Done states.
+struct FloqyPoodleMascotView: View {
+    let mode: PoodleMascotMode
+    let width: CGFloat
+    var gazeOffset: CGSize = .zero
+    var isBlinking: Bool = false
+    var isHappy: Bool = false
+    var showSparks: Bool = false
+    var isCelebrating: Bool = false
 
-        var path = Path()
-        path.move(to: p(7.6, 10.4))
-        path.addQuadCurve(to: p(4.2, 5.2), control: p(4.9, 8.6))
-        return path
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let height = round(width * 0.72)
+        let animateLoop = mode == .working && !reduceMotion
+        let hopY: CGFloat = (mode == .done && !reduceMotion && !isCelebrating) ? 4 : 0
+        let hopScale: CGFloat = (mode == .done && !reduceMotion && !isCelebrating) ? 0.9 : 1.0
+
+        TimelineView(.animation(paused: !animateLoop)) { context in
+            let t = animateLoop ? context.date.timeIntervalSinceReferenceDate : 0
+            Canvas { ctx, canvasSize in
+                drawPoodle(in: &ctx, size: canvasSize, time: t)
+            }
+        }
+        .frame(width: width, height: height)
+        .scaleEffect(hopScale, anchor: .bottom)
+        .offset(y: hopY)
+        .accessibilityHidden(true)
     }
-}
 
-private struct DogEarOutlineShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let sx = rect.width / 30
-        let sy = rect.height / 15
-        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * sx, y: y * sy) }
+    private func drawPoodle(in context: inout GraphicsContext, size: CGSize, time: TimeInterval) {
+        let sx = size.width / 64.0
+        let sy = size.height / 46.0
+        let isWorking = mode == .working && !reduceMotion
+        let isDone = mode == .done || isHappy
 
-        var path = Path()
-        path.move(to: p(16.2, 3.3))
-        path.addQuadCurve(to: p(14.3, 7.7), control: p(14.0, 5.6))
-        path.addQuadCurve(to: p(17.7, 6.4), control: p(16.8, 8.2))
-        return path
+        let breatheY: CGFloat = isWorking ? CGFloat(sin(time * 5.0)) * 0.55 : 0
+        let pawLeftY: CGFloat = isWorking ? CGFloat(-sin(time * 14.0) * 1.4 - 1.4) : ((isDone && !reduceMotion) ? -2.8 : 0)
+        let pawRightY: CGFloat = isWorking ? CGFloat(-sin(time * 14.0 + .pi) * 1.4 - 1.4) : ((isDone && !reduceMotion) ? -2.8 : 0)
+        let eyeShiftX: CGFloat = isWorking ? CGFloat(sin(time * 2.8) * 1.6) : gazeOffset.width
+        let eyeShiftY: CGFloat = isWorking ? 0.4 : gazeOffset.height
+
+        func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: x * sx, y: y * sy)
+        }
+
+        func fillCircle(_ cx: CGFloat, _ cy: CGFloat, _ r: CGFloat, shading: GraphicsContext.Shading) {
+            let rect = CGRect(x: (cx - r) * sx, y: (cy - r + breatheY) * sy, width: r * 2 * sx, height: r * 2 * sy)
+            context.fill(Path(ellipseIn: rect), with: shading)
+        }
+
+        func fillEllipse(_ cx: CGFloat, _ cy: CGFloat, _ rx: CGFloat, _ ry: CGFloat, dy: CGFloat = 0, shading: GraphicsContext.Shading) {
+            let rect = CGRect(x: (cx - rx) * sx, y: (cy - ry + dy) * sy, width: rx * 2 * sx, height: ry * 2 * sy)
+            context.fill(Path(ellipseIn: rect), with: shading)
+        }
+
+        if showSparks {
+            drawSparks(in: &context, sx: sx, sy: sy, isWorking: isWorking, time: time)
+        }
+
+        let earGradient = GraphicsContext.Shading.radialGradient(
+            Gradient(colors: [
+                Color(red: 220 / 255, green: 110 / 255, blue: 41 / 255),
+                Color(red: 158 / 255, green: 60 / 255, blue: 18 / 255)
+            ]),
+            center: pt(32, 27),
+            startRadius: 2 * sx,
+            endRadius: 28 * sx
+        )
+        let earCircles: [(CGFloat, CGFloat, CGFloat)] = [
+            (11.5, 28.5, 6.2), (9.5, 34.5, 5.6), (14.5, 22.5, 5.4),
+            (52.5, 28.5, 6.2), (54.5, 34.5, 5.6), (49.5, 22.5, 5.4)
+        ]
+        for (cx, cy, r) in earCircles {
+            fillCircle(cx, cy, r, shading: earGradient)
+        }
+
+        let furGradient = GraphicsContext.Shading.radialGradient(
+            Gradient(colors: [
+                Color(red: 242 / 255, green: 148 / 255, blue: 75 / 255),
+                Color(red: 219 / 255, green: 107 / 255, blue: 39 / 255),
+                Color(red: 185 / 255, green: 75 / 255, blue: 24 / 255)
+            ]),
+            center: pt(32, 20),
+            startRadius: 2 * sx,
+            endRadius: 24 * sx
+        )
+        let crownPuffs: [(CGFloat, CGFloat, CGFloat)] = [
+            (32, 14, 8.2), (24, 15.8, 6.8), (40, 15.8, 6.8), (18.2, 20.2, 5.8), (45.8, 20.2, 5.8)
+        ]
+        for (cx, cy, r) in crownPuffs {
+            fillCircle(cx, cy, r, shading: furGradient)
+        }
+        fillEllipse(32, 28.5, 16.5, 12.5, dy: breatheY, shading: furGradient)
+
+        // Warm snout + chocolate button nose
+        fillEllipse(32, 33.5, 9.2, 6.2, dy: breatheY, shading: .color(Color(red: 244 / 255, green: 160 / 255, blue: 90 / 255)))
+        fillEllipse(32, 31.3, 3.4, 2.2, dy: breatheY, shading: .color(Color(red: 42 / 255, green: 21 / 255, blue: 11 / 255)))
+        fillEllipse(31.2, 30.6, 1.1, 0.55, dy: breatheY, shading: .color(Color(red: 124 / 255, green: 81 / 255, blue: 61 / 255).opacity(0.65)))
+
+        if isDone {
+            let arcColor = Color(red: 38 / 255, green: 18 / 255, blue: 9 / 255)
+            for centerX in [CGFloat(23.5), CGFloat(40.5)] {
+                var arc = Path()
+                arc.move(to: pt(centerX - 3.0, 29.5 + breatheY))
+                arc.addQuadCurve(
+                    to: pt(centerX + 3.0, 29.5 + breatheY),
+                    control: pt(centerX, 25.2 + breatheY)
+                )
+                context.stroke(arc, with: .color(arcColor), style: StrokeStyle(lineWidth: max(1.4, 2.4 * sx), lineCap: .round))
+            }
+        } else {
+            let eyeScaleY: CGFloat = isBlinking ? 0.14 : 1.0
+            let eyeColor = Color(red: 35 / 255, green: 16 / 255, blue: 7 / 255)
+            for baseX in [CGFloat(23.5), CGFloat(40.5)] {
+                let cx = baseX + eyeShiftX
+                let cy = 28.5 + eyeShiftY + breatheY
+                fillEllipse(cx, cy, 2.75, 2.75 * eyeScaleY, shading: .color(eyeColor))
+                if !isBlinking {
+                    fillCircle(cx - 0.8, cy - 1.1 - breatheY, 0.9, shading: .color(.white))
+                }
+            }
+        }
+
+        let pawOuter = Color(red: 220 / 255, green: 110 / 255, blue: 41 / 255)
+        let pawInner = Color(red: 236 / 255, green: 142 / 255, blue: 72 / 255)
+        fillEllipse(16.5, 40.5, 6.8, 4.4, dy: pawLeftY, shading: .color(pawOuter))
+        fillEllipse(16.5, 39.8, 5.2, 3.2, dy: pawLeftY, shading: .color(pawInner))
+        fillEllipse(47.5, 40.5, 6.8, 4.4, dy: pawRightY, shading: .color(pawOuter))
+        fillEllipse(47.5, 39.8, 5.2, 3.2, dy: pawRightY, shading: .color(pawInner))
+    }
+
+    private func drawSparks(
+        in context: inout GraphicsContext,
+        sx: CGFloat,
+        sy: CGFloat,
+        isWorking: Bool,
+        time: TimeInterval
+    ) {
+        let sparkColor = Color(red: 245 / 255, green: 158 / 255, blue: 11 / 255)
+        let alphaA = isWorking ? (0.35 + 0.65 * ((sin(time * 6.0) + 1.0) * 0.5)) : ((mode == .done && !isCelebrating && !reduceMotion) ? 0.0 : 0.98)
+        let alphaB = isWorking ? (0.35 + 0.65 * ((sin(time * 6.0 + .pi) + 1.0) * 0.5)) : ((mode == .done && !isCelebrating && !reduceMotion) ? 0.0 : 0.98)
+
+        let specs: [(cx: CGFloat, cy: CGFloat, w: CGFloat, h: CGFloat, angleDeg: CGFloat, alpha: Double)] = [
+            (48.8, 9.0, 5.4, 11.5, 22, alphaA),
+            (56.6, 14.5, 5.0, 10.5, 42, alphaB)
+        ]
+        for spec in specs {
+            var local = context
+            local.opacity = spec.alpha
+            local.translateBy(x: spec.cx * sx, y: spec.cy * sy)
+            local.rotate(by: .degrees(spec.angleDeg))
+            let rect = CGRect(
+                x: (-spec.w / 2) * sx,
+                y: (-spec.h / 2) * sy,
+                width: spec.w * sx,
+                height: spec.h * sy
+            )
+            local.fill(
+                Path(roundedRect: rect, cornerRadius: (spec.w / 2) * sx),
+                with: .color(sparkColor)
+            )
+        }
     }
 }
 

@@ -158,7 +158,7 @@ struct NotchGeometry: Equatable {
         for mode: NotchMode,
         idleAppearance: IdleAppearance = .off
     ) -> CGFloat {
-        guard case .idle = mode, idleAppearance.isSideWing else { return 0 }
+        guard case .idle = mode, idleAppearance == .dog else { return 0 }
         return Self.sideWingSlotWidth
     }
 

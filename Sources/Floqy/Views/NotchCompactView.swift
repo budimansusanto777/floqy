@@ -198,20 +198,39 @@ struct NotchCompactView: View {
                 .padding(.vertical, 2)
                 .background(Capsule().fill(NotchColors.statusWarning.opacity(0.16)))
         case .pomodoro:
-            Text(productivity.pomodoro.formattedTime)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .monospacedDigit()
-                .foregroundStyle(
-                    productivity.pomodoro.isRunning ? NotchColors.focusAccent : NotchColors.textSecondary
-                )
+            HStack(spacing: 5) {
+                if productivity.pomodoro.isRunning {
+                    if manager.idleAppearance == .dog {
+                        FloqyPoodleMascotView(mode: .working, width: 26, showSparks: false)
+                    } else if manager.idleAppearance == .cat {
+                        FloqyCalicoMascotView(mode: .working, width: 26, showSparks: false)
+                    }
+                }
+                Text(productivity.pomodoro.formattedTime)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundStyle(
+                        productivity.pomodoro.isRunning ? NotchColors.focusAccent : NotchColors.textSecondary
+                    )
+            }
         case .ai:
             HStack(spacing: 5) {
-                Text(ai.workingAgent != nil ? "Working" : "Ready")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(ai.workingAgent != nil ? NotchColors.accentPrimary : NotchColors.statusHealthy)
-                if ai.workingAgent != nil {
+                if manager.idleAppearance == .dog && ai.workingAgent != nil {
+                    FloqyPoodleMascotView(mode: .working, width: 28, showSparks: true)
                     EqualizerBarsView(isPlaying: true, barCount: 3)
                         .frame(height: 11)
+                } else if manager.idleAppearance == .cat && ai.workingAgent != nil {
+                    FloqyCalicoMascotView(mode: .working, width: 28, showSparks: true)
+                    EqualizerBarsView(isPlaying: true, barCount: 3)
+                        .frame(height: 11)
+                } else {
+                    Text(ai.workingAgent != nil ? "Working" : "Ready")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(ai.workingAgent != nil ? NotchColors.accentPrimary : NotchColors.statusHealthy)
+                    if ai.workingAgent != nil {
+                        EqualizerBarsView(isPlaying: true, barCount: 3)
+                            .frame(height: 11)
+                    }
                 }
             }
         case .memory:
@@ -264,7 +283,9 @@ struct NotchAlertView: View {
         }
         .onAppear {
             if !reduceMotion {
-                iconPopped = true
+                withAnimation(.spring(response: 0.38, dampingFraction: 0.62)) {
+                    iconPopped = true
+                }
             }
         }
     }
@@ -326,19 +347,35 @@ struct NotchAlertView: View {
     private var alertBadge: some View {
         switch alert {
         case .pomodoroComplete:
-            Image(systemName: "checkmark")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(NotchColors.statusHealthy)
-                .symbolEffect(.bounce, value: iconPopped)
-                .frame(width: 32, height: 32)
-                .background(
-                    RoundedRectangle(cornerRadius: 9)
-                        .fill(NotchColors.statusHealthy.opacity(0.16))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 9)
-                                .stroke(NotchColors.statusHealthy.opacity(0.35), lineWidth: 1)
-                        )
+            if manager.idleAppearance == .dog {
+                FloqyPoodleMascotView(
+                    mode: .done,
+                    width: 42,
+                    showSparks: true,
+                    isCelebrating: iconPopped
                 )
+            } else if manager.idleAppearance == .cat {
+                FloqyCalicoMascotView(
+                    mode: .done,
+                    width: 44,
+                    showSparks: true,
+                    isCelebrating: iconPopped
+                )
+            } else {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(NotchColors.statusHealthy)
+                    .symbolEffect(.bounce, value: iconPopped)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        RoundedRectangle(cornerRadius: 9)
+                            .fill(NotchColors.statusHealthy.opacity(0.16))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 9)
+                                    .stroke(NotchColors.statusHealthy.opacity(0.35), lineWidth: 1)
+                            )
+                    )
+            }
         case .meetingStarting(_, _, let provider, _):
             let accent = provider == "Google Meet" ? NotchColors.statusHealthy : NotchColors.accentPrimary
             Image(systemName: "video.fill")
@@ -354,20 +391,36 @@ struct NotchAlertView: View {
                         )
                 )
         case .aiFinished(let agent):
-            let accent = accentColor(for: agent)
-            Image(systemName: "triangle")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(accent)
-                .symbolEffect(.bounce, value: iconPopped)
-                .frame(width: 32, height: 32)
-                .background(
-                    RoundedRectangle(cornerRadius: 9)
-                        .fill(accent.opacity(0.16))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 9)
-                                .stroke(accent.opacity(0.35), lineWidth: 1)
-                        )
+            if manager.idleAppearance == .dog {
+                FloqyPoodleMascotView(
+                    mode: .done,
+                    width: 42,
+                    showSparks: true,
+                    isCelebrating: iconPopped
                 )
+            } else if manager.idleAppearance == .cat {
+                FloqyCalicoMascotView(
+                    mode: .done,
+                    width: 44,
+                    showSparks: true,
+                    isCelebrating: iconPopped
+                )
+            } else {
+                let accent = accentColor(for: agent)
+                Image(systemName: "triangle")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(accent)
+                    .symbolEffect(.bounce, value: iconPopped)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        RoundedRectangle(cornerRadius: 9)
+                            .fill(accent.opacity(0.16))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 9)
+                                    .stroke(accent.opacity(0.35), lineWidth: 1)
+                            )
+                    )
+            }
         case .headphonesConnected(_, _, let isAirPods):
             Image(systemName: isAirPods ? "airpodspro" : "headphones")
                 .font(.system(size: 15, weight: .medium))

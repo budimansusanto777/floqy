@@ -54,7 +54,8 @@ final class CalendarService: ObservableObject {
                 guard let self else { return }
                 self.now = Date()
                 self.refreshTickCount += 1
-                if self.refreshTickCount >= 20 || CalendarLogic.dayKey(for: self.now) != self.lastRefreshDayKey {
+                let hasEndedUpcoming = self.upcomingEvents.contains { $0.endDate <= self.now }
+                if self.refreshTickCount >= 20 || hasEndedUpcoming || CalendarLogic.dayKey(for: self.now) != self.lastRefreshDayKey {
                     self.refreshEvents()
                 }
             }

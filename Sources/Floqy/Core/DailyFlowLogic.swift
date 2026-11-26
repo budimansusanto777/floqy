@@ -188,7 +188,10 @@ enum CalendarLogic {
     }
 
     static func formatCountdown(from now: Date, to start: Date, end: Date) -> String {
-        if now >= start && now < end {
+        if now >= end {
+            return "Ended"
+        }
+        if now >= start {
             return "Now"
         }
         let deltaSeconds = start.timeIntervalSince(now)

@@ -26,6 +26,7 @@ final class ObsidianService: ObservableObject {
     @Published private(set) var lastError: String?
 
     private var feedbackClearTask: Task<Void, Never>?
+    private weak var activeOpenPanel: NSOpenPanel?
 
     var isVaultConfigured: Bool {
         vaultName != nil && UserDefaults.standard.data(forKey: Self.bookmarkKey) != nil
@@ -43,6 +44,12 @@ final class ObsidianService: ObservableObject {
     }
 
     func chooseVaultFolder(onComplete: (() -> Void)? = nil) {
+        if let activeOpenPanel {
+            NSApp.activate(ignoringOtherApps: true)
+            activeOpenPanel.makeKeyAndOrderFront(nil)
+            return
+        }
+
         NSApp.activate(ignoringOtherApps: true)
         let panel = NSOpenPanel()
         panel.title = "Choose Notes Folder"
@@ -51,10 +58,14 @@ final class ObsidianService: ObservableObject {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
+        activeOpenPanel = panel
 
         panel.begin { [weak self] response in
             Task { @MainActor [weak self] in
-                defer { onComplete?() }
+                defer {
+                    self?.activeOpenPanel = nil
+                    onComplete?()
+                }
                 guard let self, response == .OK, let url = panel.url else { return }
                 do {
                     let bookmark = try Self.makeBookmark(for: url)

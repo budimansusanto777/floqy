@@ -160,6 +160,14 @@ enum CoreSelfCheck {
             CalendarLogic.formatCountdown(from: now, to: now.addingTimeInterval(-60), end: now.addingTimeInterval(600)) == "Now",
             "Active meeting should show Now"
         )
+        precondition(
+            CalendarLogic.formatCountdown(from: now, to: now.addingTimeInterval(-3600), end: now.addingTimeInterval(-1)) == "Ended",
+            "Ended meeting should show Ended"
+        )
+        precondition(
+            CalendarLogic.formatCountdown(from: now, to: now.addingTimeInterval(-3600), end: now) == "Ended",
+            "Meeting ending exactly now should show Ended"
+        )
 
         var freshPomodoro = PomodoroState(durationMinutes: 1)
         precondition(freshPomodoro.isAtInitialStart, "Fresh stopped Pomodoro should be at initial start")
@@ -580,9 +588,12 @@ enum CoreSelfCheck {
 
         let catSize = geometry.shellSize(for: .idle, idleAppearance: .cat)
         let catHit = geometry.hitRectInPanel(for: .idle, idleAppearance: .cat)
+        let dogHit = geometry.hitRectInPanel(for: .idle, idleAppearance: .dog)
         precondition(catSize.height == geometry.hardwareNotchSize.height, "Side-wing Cat must match camera height on a single row")
-        precondition(geometry.leftLeadingInset(for: .idle, idleAppearance: .cat) == NotchGeometry.sideWingSlotWidth, "Right-wing Cat must leave leading inset for left menu bar")
-        precondition(catHit.minX >= NotchGeometry.sideWingSlotWidth - 0.5, "Side-wing hit rect must not cover left transparent menu-bar slot")
+        precondition(geometry.leftLeadingInset(for: .idle, idleAppearance: .cat) == 0, "Symmetrical Cat uses both left and right wings")
+        precondition(catHit.minX <= 0.5, "Symmetrical Cat hit rect should span both wings")
+        precondition(geometry.leftLeadingInset(for: .idle, idleAppearance: .dog) == NotchGeometry.sideWingSlotWidth, "Right-wing Dog must leave leading inset for left menu bar")
+        precondition(dogHit.minX >= NotchGeometry.sideWingSlotWidth - 0.5, "Side-wing Dog hit rect must not cover left transparent menu-bar slot")
 
         let rightWingShape = NotchShellShape(
             topEarRadius: NotchGeometry.earWidth,

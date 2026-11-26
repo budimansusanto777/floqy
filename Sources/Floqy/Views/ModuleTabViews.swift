@@ -1767,6 +1767,7 @@ struct AITabView: View {
             agentsCard
         }
         .onAppear {
+            ai.syncDayIfNeeded()
             ai.refreshHookStatus()
             ai.refreshClaudeLocalUsage()
         }

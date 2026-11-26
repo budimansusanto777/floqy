@@ -199,7 +199,7 @@ struct SettingsView: View {
             }
 
             Section("About Floqy") {
-                LabeledContent("Version", value: "1.0.0")
+                LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.1.0")
                 LabeledContent("License", value: "GNU GPLv3")
                 LabeledContent("Copyright", value: "© 2026 budimansusanto777")
             }

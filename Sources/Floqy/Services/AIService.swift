@@ -137,8 +137,15 @@ final class AIService: ObservableObject {
             candidateApps = ["/Applications/Antigravity.app", "\(NSHomeDirectory())/Applications/Antigravity.app"]
         case .claudeDesktop:
             candidateApps = ["/Applications/Claude.app", "\(NSHomeDirectory())/Applications/Claude.app"]
-        case .geminiCLI, .claudeCode:
-            candidateApps = ["/System/Applications/Utilities/Terminal.app", "/Applications/iTerm.app"]
+        case .claudeCode:
+            candidateApps = [
+                "/Applications/Claude.app",
+                "\(NSHomeDirectory())/Applications/Claude.app",
+                "/Applications/iTerm.app",
+                "/System/Applications/Utilities/Terminal.app"
+            ]
+        case .geminiCLI:
+            candidateApps = ["/Applications/iTerm.app", "/System/Applications/Utilities/Terminal.app"]
         }
 
         for path in candidateApps where FileManager.default.fileExists(atPath: path) {
@@ -240,7 +247,7 @@ final class AIService: ObservableObject {
         }
     }
 
-    private func syncDayIfNeeded() {
+    func syncDayIfNeeded() {
         let todayKey = CalendarLogic.dayKey(for: Date())
         guard dailyCountDayKey != todayKey else { return }
         dailyCountDayKey = todayKey

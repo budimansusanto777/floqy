@@ -128,6 +128,7 @@ final class NotchManager: ObservableObject {
     private(set) var isHoveringCompactControls: Bool = false
     private var isTrackingMenu: Bool = false
     private var isPresentingFilePicker: Bool = false
+    private weak var activeWallpaperPanel: NSOpenPanel?
     private var cursorScreenMonitor: Any?
     private var lastCursorScreenCheck: CFTimeInterval = 0
     private var cancellables: Set<AnyCancellable> = []
@@ -682,6 +683,12 @@ final class NotchManager: ObservableObject {
     }
 
     func chooseWallpaperImage() {
+        if let activeWallpaperPanel {
+            NSApp.activate(ignoringOtherApps: true)
+            activeWallpaperPanel.makeKeyAndOrderFront(nil)
+            return
+        }
+
         hoverTask?.cancel()
         isPresentingFilePicker = true
         NSApp.activate(ignoringOtherApps: true)
@@ -692,11 +699,15 @@ final class NotchManager: ObservableObject {
         openPanel.canChooseDirectories = false
         openPanel.prompt = "Choose"
         openPanel.message = "Select an image to use as Floqy's notch wallpaper."
+        activeWallpaperPanel = openPanel
 
         openPanel.begin { [weak self] response in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                defer { self.isPresentingFilePicker = false }
+                defer {
+                    self.activeWallpaperPanel = nil
+                    self.isPresentingFilePicker = false
+                }
                 guard response == .OK,
                       let selectedURL = openPanel.url,
                       let sourceImage = NSImage(contentsOf: selectedURL),

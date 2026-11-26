@@ -28,6 +28,8 @@ final class FilesTrayService: ObservableObject {
     @Published var selectedID: UUID?
     @Published private(set) var isProcessing: Bool = false
 
+    private weak var activeOpenPanel: NSOpenPanel?
+
     private nonisolated static var trayTempDirectoryURL: URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("FloqyTray", isDirectory: true)
     }
@@ -89,6 +91,12 @@ final class FilesTrayService: ObservableObject {
     }
 
     func pickFilesFromPanel(onComplete: @escaping (Int) -> Void) {
+        if let activeOpenPanel {
+            NSApp.activate(ignoringOtherApps: true)
+            activeOpenPanel.makeKeyAndOrderFront(nil)
+            return
+        }
+
         NSApp.activate(ignoringOtherApps: true)
         let panel = NSOpenPanel()
         panel.title = "Add Files to Floqy Tray"
@@ -96,9 +104,11 @@ final class FilesTrayService: ObservableObject {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
+        activeOpenPanel = panel
 
         panel.begin { [weak self] response in
             Task { @MainActor [weak self] in
+                self?.activeOpenPanel = nil
                 guard let self, response == .OK, !panel.urls.isEmpty else {
                     onComplete(0)
                     return
