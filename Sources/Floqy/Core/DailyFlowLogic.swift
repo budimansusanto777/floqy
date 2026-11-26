@@ -1,8 +1,17 @@
 import Foundation
 
-enum MusicSource: String, Equatable {
+enum MusicSource: String, CaseIterable, Identifiable, Equatable {
     case spotify = "Spotify"
     case appleMusic = "Apple Music"
+
+    var id: String { rawValue }
+
+    var shortName: String {
+        switch self {
+        case .spotify: return "Spotify"
+        case .appleMusic: return "Music"
+        }
+    }
 }
 
 struct NowPlayingTrack: Equatable {

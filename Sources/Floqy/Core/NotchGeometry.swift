@@ -118,10 +118,14 @@ struct NotchGeometry: Equatable {
                 return CGSize(width: 424, height: max(86, notchSafeTopHeight + 52))
             }
         case .expanded:
+            let rawWidth: CGFloat = hasHardwareNotch
+                ? max(596, hardwareNotchSize.width + 396)
+                : 596
+            let expandedWidth = ceil(rawWidth / 2) * 2
             if activeTab == .home && homeSubView == .calendar {
-                return CGSize(width: 596, height: max(268, notchSafeTopHeight + 234))
+                return CGSize(width: expandedWidth, height: max(268, notchSafeTopHeight + 234))
             }
-            return CGSize(width: 596, height: max(224, notchSafeTopHeight + 190))
+            return CGSize(width: expandedWidth, height: max(224, notchSafeTopHeight + 190))
         }
     }
 
@@ -153,13 +157,12 @@ struct NotchGeometry: Equatable {
         return max(0, (baseWidth - Self.idleChinWidth) / 2)
     }
 
-    /// Leading transparent inset inside the centered panel when only a right-side wing is shown.
+    /// Leading transparent inset inside the centered panel (0 so Cat and Dog share both wings).
     func leftLeadingInset(
         for mode: NotchMode,
         idleAppearance: IdleAppearance = .off
     ) -> CGFloat {
-        guard case .idle = mode, idleAppearance == .dog else { return 0 }
-        return Self.sideWingSlotWidth
+        return 0
     }
 
     /// Anchors any given panel size horizontally centered at the top bezel of the target screen.

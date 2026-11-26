@@ -7,6 +7,9 @@ import Foundation
 final class MusicService: ObservableObject {
     @Published private(set) var track: NowPlayingTrack?
     @Published private(set) var artworkImage: NSImage?
+    @Published private(set) var installedSources: [MusicSource] = []
+    @Published private(set) var runningSources: Set<MusicSource> = []
+    @Published private(set) var launchingSource: MusicSource?
 
     private static let spotifyBundleID = "com.spotify.client"
     private static let appleMusicBundleID = "com.apple.Music"
@@ -15,9 +18,12 @@ final class MusicService: ObservableObject {
     private var playbackTimer: Timer?
     private var tickCount = 0
     private var cachedArtworkKey: String?
+    private var appIcons: [MusicSource: NSImage] = [:]
+    private var launchRefreshTask: Task<Void, Never>?
 
     func start() {
         stop()
+        refreshInstalledPlayers()
 
         let center = DistributedNotificationCenter.default()
         observers.append(
@@ -49,6 +55,9 @@ final class MusicService: ObservableObject {
     }
 
     func stop() {
+        launchRefreshTask?.cancel()
+        launchRefreshTask = nil
+        launchingSource = nil
         let center = DistributedNotificationCenter.default()
         for observer in observers {
             center.removeObserver(observer)
@@ -56,6 +65,44 @@ final class MusicService: ObservableObject {
         observers.removeAll()
         playbackTimer?.invalidate()
         playbackTimer = nil
+    }
+
+    func refreshInstalledPlayers() {
+        var detected: [MusicSource] = []
+        var icons: [MusicSource: NSImage] = [:]
+        for source in MusicSource.allCases {
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID(for: source)) {
+                detected.append(source)
+                icons[source] = NSWorkspace.shared.icon(forFile: url.path)
+            }
+        }
+        installedSources = detected
+        appIcons = icons
+    }
+
+    func appIcon(for source: MusicSource) -> NSImage? {
+        appIcons[source]
+    }
+
+    func openPlayer(_ source: MusicSource) {
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID(for: source)) else {
+            refreshInstalledPlayers()
+            return
+        }
+
+        launchRefreshTask?.cancel()
+        launchingSource = source
+
+        launchRefreshTask = Task { [weak self] in
+            _ = try? await NSWorkspace.shared.openApplication(
+                at: appURL,
+                configuration: NSWorkspace.OpenConfiguration()
+            )
+            try? await Task.sleep(for: .milliseconds(900))
+            guard !Task.isCancelled, let self else { return }
+            await self.refreshRunningPlayer(preferred: source)
+            self.launchingSource = nil
+        }
     }
 
     // MARK: - Playback Controls
@@ -124,6 +171,11 @@ final class MusicService: ObservableObject {
         let spotifyRunning = isAppRunning(Self.spotifyBundleID)
         let musicRunning = isAppRunning(Self.appleMusicBundleID)
 
+        var running: Set<MusicSource> = []
+        if spotifyRunning { running.insert(.spotify) }
+        if musicRunning { running.insert(.appleMusic) }
+        runningSources = running
+
         let candidates: [MusicSource]
         switch preferred {
         case .spotify:
@@ -145,6 +197,7 @@ final class MusicService: ObservableObject {
         for source in candidates {
             if let fetched = await fetchTrack(from: source) {
                 track = fetched
+                launchingSource = nil
                 syncPlaybackTimer()
                 await loadArtworkIfNeeded(for: fetched)
                 return

@@ -432,30 +432,98 @@ struct HomeTabView: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(NotchColors.textPrimary)
 
-                    Text("No active playback.")
+                    Text(musicEmptyHeadline)
                         .font(.system(size: 11.5, weight: .medium))
                         .foregroundStyle(NotchColors.textPrimary)
 
-                    Text("Play audio in Spotify or Apple Music to control tracks here.")
+                    Text(musicEmptyHelper)
                         .font(.system(size: 11))
                         .foregroundStyle(NotchColors.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
 
                     Spacer(minLength: 0)
 
-                    Button {
-                        manager.showCompact(.music)
-                    } label: {
-                        Label("Preview Music Wing", systemImage: "music.note")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(NotchColors.accentPrimary)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
+                    if !music.installedSources.isEmpty {
+                        HStack(spacing: 6) {
+                            ForEach(music.installedSources) { source in
+                                musicLaunchButton(for: source)
+                            }
+                        }
                     }
-                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 7))
+                }
+                .onAppear {
+                    music.refreshInstalledPlayers()
                 }
             }
         }
+    }
+
+    private var musicEmptyHeadline: String {
+        (!music.runningSources.isEmpty && !music.installedSources.isEmpty)
+            ? "Player open, no track playing."
+            : "No active playback."
+    }
+
+    private var musicEmptyHelper: String {
+        if music.installedSources.isEmpty {
+            return "Install Spotify or Apple Music to control playback here."
+        }
+        if music.installedSources.count > 1 {
+            return music.runningSources.isEmpty
+                ? "Open a player to control tracks from the notch."
+                : "App is open with no track queued yet. Start playback to show controls."
+        }
+        let only = music.installedSources[0]
+        return music.runningSources.contains(only)
+            ? "\(only.rawValue) is open with no track queued yet. Start a track to show controls."
+            : "Open \(only.rawValue) to control tracks from the notch."
+    }
+
+    private func musicLaunchButton(for source: MusicSource) -> some View {
+        let isLaunching = music.launchingSource == source
+        let title: String
+        if isLaunching {
+            title = "Opening…"
+        } else if music.installedSources.count == 1 {
+            title = "Open \(source.shortName)"
+        } else {
+            title = source.shortName
+        }
+
+        return Button {
+            music.openPlayer(source)
+        } label: {
+            HStack(spacing: 5) {
+                if let icon = music.appIcon(for: source) {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 14, height: 14)
+                } else {
+                    Image(systemName: "music.note")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(NotchColors.accentPrimary)
+                }
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(NotchColors.textPrimary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(NotchColors.controlSubtle)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke(NotchColors.cardBorder, lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 7))
+        .disabled(music.launchingSource != nil)
+        .accessibilityLabel("Open \(source.rawValue)")
     }
 
     @ViewBuilder

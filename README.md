@@ -25,7 +25,7 @@ Built with native Swift, SwiftUI, and AppKit for macOS 14.0+ (Sonoma).
 | Left | **Home** | Spotify & Apple Music playback controls, Google/iCloud/Exchange Calendar + 1-click Join, Pomodoro & Todo overview |
 | Left | **Shelf** | Smart Drag-and-Drop Tray, native AirDrop, image/PDF compression & WebP conversion, offline Vision OCR |
 | Left | **Focus** | Interactive click-or-drag Pomodoro Focus Timer, 4-round session counter, persistent Todo list & local/Obsidian Markdown Notes |
-| Right | **Clipboard** | Searchable clipboard history (`⌘⇧V`) with auto-type badges, pinning, clear unpinned, and instant paste |
+| Right | **Board** | Searchable clipboard history (`⌘⇧V`) with auto-type badges, pinning, clear unpinned, and instant paste |
 | Right | **AI** | Antigravity, Gemini CLI, Claude Code & Claude Desktop hook status (`floqy://`), live activity equalizer, & quick launch |
 | Right | **System** | Kernel-level Memory Pressure monitor, top RAM consumers, 1-click Quit/Purge, & local dev ports |
 | Right | **Settings (`⚙`)** | Inline theme/wallpaper selector, idle companion (`Off`, `Eyes`, `Cat`, `Dog`, `Wave`, `Horizon`), hardware card toggles |

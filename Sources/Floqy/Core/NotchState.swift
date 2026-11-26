@@ -106,7 +106,7 @@ enum NotchTab: String, CaseIterable, Identifiable, Hashable {
         case .home: return "Home"
         case .files: return "Shelf"
         case .notes: return "Focus"
-        case .clipboard: return "Clipboard"
+        case .clipboard: return "Board"
         case .ai: return "AI"
         case .system: return "System"
         }

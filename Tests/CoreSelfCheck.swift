@@ -85,6 +85,16 @@ enum CoreSelfCheck {
         precondition(expandedCalendar.height > expandedOverview.height, "Calendar mode height must exceed Overview height")
         let filesWhileCalendar = geometry.panelFrame(for: .expanded, homeSubView: .calendar, activeTab: .files)
         precondition(filesWhileCalendar.height == expandedOverview.height, "Non-Home tabs must stay at Overview height")
+
+        let wideScreenFrame = CGRect(x: 0, y: 0, width: 1800, height: 1169)
+        let wideGeometry = NotchGeometry(
+            screenFrame: wideScreenFrame,
+            auxiliaryTopLeftArea: CGRect(x: 0, y: 1131, width: 780, height: 38),
+            auxiliaryTopRightArea: CGRect(x: 1020, y: 1131, width: 780, height: 38)
+        )
+        let wideExpandedSize = wideGeometry.shellSize(for: .expanded)
+        precondition(wideExpandedSize.width == 636, "Wide notch expanded width mismatch")
+        precondition((wideExpandedSize.width - 24 - wideGeometry.notchCenterGapWidth) / 2 >= 180, "Wide notch wings must keep at least 180pt")
     }
 
     private static func checkHitRectsContainedAndOrderedByMode() {
@@ -132,6 +142,7 @@ enum CoreSelfCheck {
         precondition(NotchTab.leftTabs.count == 3, "Expected 3 left tabs")
         precondition(NotchTab.rightTabs.count == 3, "Expected 3 right tabs")
         precondition(Set(NotchTab.leftTabs + NotchTab.rightTabs) == Set(NotchTab.allCases), "Tabs must cover all cases")
+        precondition(NotchTab.clipboard.title == "Board", "Expected Clipboard tab title to be Board")
     }
 
     private static func checkDailyFlowLogic() {
@@ -212,6 +223,8 @@ enum CoreSelfCheck {
 
         precondition(NowPlayingTrack.formatDuration(88) == "1:28", "Duration format mismatch")
         precondition(NowPlayingTrack.formatDuration(-5) == "0:00", "Negative duration format mismatch")
+        precondition(MusicSource.allCases == [.spotify, .appleMusic], "MusicSource case order mismatch")
+        precondition(MusicSource.spotify.shortName == "Spotify" && MusicSource.appleMusic.shortName == "Music", "MusicSource shortName mismatch")
 
         let sample = [TodoItem(title: "Ship Phase 1", isDone: false)]
         let encoded = try? JSONEncoder().encode(sample)
@@ -592,8 +605,8 @@ enum CoreSelfCheck {
         precondition(catSize.height == geometry.hardwareNotchSize.height, "Side-wing Cat must match camera height on a single row")
         precondition(geometry.leftLeadingInset(for: .idle, idleAppearance: .cat) == 0, "Symmetrical Cat uses both left and right wings")
         precondition(catHit.minX <= 0.5, "Symmetrical Cat hit rect should span both wings")
-        precondition(geometry.leftLeadingInset(for: .idle, idleAppearance: .dog) == NotchGeometry.sideWingSlotWidth, "Right-wing Dog must leave leading inset for left menu bar")
-        precondition(dogHit.minX >= NotchGeometry.sideWingSlotWidth - 0.5, "Side-wing Dog hit rect must not cover left transparent menu-bar slot")
+        precondition(geometry.leftLeadingInset(for: .idle, idleAppearance: .dog) == 0, "Symmetrical Dog uses both left and right wings")
+        precondition(dogHit.minX <= 0.5, "Symmetrical Dog hit rect should span both wings")
 
         let rightWingShape = NotchShellShape(
             topEarRadius: NotchGeometry.earWidth,

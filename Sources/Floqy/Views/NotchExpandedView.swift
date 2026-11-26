@@ -82,6 +82,8 @@ struct NotchExpandedView: View {
             HStack(spacing: 4) {
                 Text(tab.title)
                     .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                 if tab == .files && !filesTray.items.isEmpty {
                     Text("\(filesTray.items.count)")
                         .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
