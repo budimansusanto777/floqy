@@ -1,62 +1,43 @@
 <div align="center">
 
+<img src="Resources/AppIcon.png" alt="Floqy" width="84" />
+
 # Floqy
 
 **Your MacBook notch, evolved into a fast, native command hub.**
 
-Built with native Swift, SwiftUI, and AppKit for macOS 14.0+ (Sonoma).
+[Preview](#preview) · [Install](#install) · [Features](#features) · [Shortcuts](#shortcuts--permissions) · [FAQ](#faq)
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-[![macOS 14.0+](https://img.shields.io/badge/macOS-14.0%2B-black.svg)](#requirements)
-[![Swift](https://img.shields.io/badge/Swift-5%20%2F%206-orange.svg)](#build-from-source)
+<p align="center">
+  <a href="https://github.com/budimansusanto777/floqy/releases/latest"><img src="https://img.shields.io/badge/Release-v1.1.0-38bdf8?style=flat-square" height="20" alt="Release v1.1.0" /></a>
+  <a href="#requirements"><img src="https://img.shields.io/badge/macOS-14.0%2B-111827?style=flat-square&logo=apple&logoColor=white" height="20" alt="macOS 14.0+" /></a>
+  <a href="#build-from-source"><img src="https://img.shields.io/badge/Swift-5%20%2F%206-F05138?style=flat-square&logo=swift&logoColor=white" height="20" alt="Swift 5 / 6" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-2563eb?style=flat-square" height="20" alt="License: GPLv3" /></a>
+</p>
 
 </div>
 
 ---
 
-## What is Floqy?
+**Floqy** transforms the hardware notch on MacBook Pro and MacBook Air into a spring-animated productivity hub built with pure Swift, SwiftUI, and AppKit. It tucks cleanly into the camera bezel when idle, surfaces Live Activities when something needs your attention, and expands on hover, `⌘⇧Space`, or file drop into six symmetrical workspace modules with zero external dependencies.
 
-**Floqy** transforms the hardware notch on MacBook Pro and MacBook Air into a spring-animated productivity hub. It stays tucked into the camera bezel until you hover, press `⌘⇧Space`, or drop a file—expanding smoothly into six symmetrical workspace modules with customizable idle companions, themes, and hardware status cards.
+## Preview
 
-## Module Matrix
+https://github.com/user-attachments/assets/98cdbd38-3984-4a02-bd0a-90da5fab0cf4
 
-| Wing | Tab | Core Capabilities |
-| :--- | :--- | :--- |
-| Left | **Home** | Spotify & Apple Music playback controls, Google/iCloud/Exchange Calendar + 1-click Join, Pomodoro & Todo overview |
-| Left | **Shelf** | Smart Drag-and-Drop Tray, native AirDrop, image/PDF compression & WebP conversion, offline Vision OCR |
-| Left | **Focus** | Interactive click-or-drag Pomodoro Focus Timer, 4-round session counter, persistent Todo list & local/Obsidian Markdown Notes |
-| Right | **Board** | Searchable clipboard history (`⌘⇧V`) with auto-type badges, pinning, clear unpinned, and instant paste |
-| Right | **AI** | Antigravity, Gemini CLI, Claude Code & Claude Desktop hook status (`floqy://`), live activity equalizer, & quick launch |
-| Right | **System** | Kernel-level Memory Pressure monitor, top RAM consumers, 1-click Quit/Purge, & local dev ports |
-| Right | **Settings (`⚙`)** | Inline theme/wallpaper selector, idle companion (`Off`, `Eyes`, `Cat`, `Dog`, `Wave`, `Horizon`), hardware card toggles |
+<p align="center">
+  <sub>Walkthrough of all 5 idle companions, Compact Live Activities &amp; Alerts, 6 workspace modules, and 6 themes.</sub>
+</p>
 
-## Key Features
+## Install
 
-- **Hardware Status Cards** — Battery-aware Headphones connected & Charging ETA alert cards.
-- **Idle Notch Companions** — Choose `Off`, contextual `Eyes`, `Wave` hairline, ambient `Horizon` pill, or right-wing 1-row `Cat` / `Dog`.
-- **Expanded Themes & Custom Wallpaper** — Keeps the closed notch seamless Obsidian black, then opens in `Obsidian`, `Midnight`, `Pure White`, `Sakura Blush`, `Rose Velvet`, or a custom notch wallpaper image (`Dark` / `Light`).
-- **Multi-Monitor & Launch at Login** — Select `Built-in Notch Display`, `Primary Display`, or `Follow Cursor`, and toggle `Start Floqy at login` via macOS `SMAppService`.
+### Download DMG (Recommended)
 
-## Notch States
+1. Download **`Floqy-1.1.0.dmg`** from [Latest Releases](https://github.com/budimansusanto777/floqy/releases/latest).
+2. Open the `.dmg` and drag **Floqy** to **Applications**.
+3. On first launch, if macOS shows an unidentified-developer prompt (the release binary is ad-hoc signed), open **System Settings → Privacy & Security** and click **Open Anyway**.
 
-- **Idle** — Flush inside the hardware camera (`Off`), a `92pt` tapered mini-chin (`Eyes` / `Wave` / `Horizon`), or a single-row right wing (`Cat` / `Dog`).
-- **Compact Live Activity** — Symmetrical Obsidian wings around the camera for Music, Focus timer, meeting alerts, AI activity, or RAM pressure.
-- **Expanded Hub** — Clean zero-shadow workspace (`596pt` wide) with concave top ears and spring shell morphing.
-
-## Permissions
-
-| Permission | Used For | Required? |
-| :--- | :--- | :--- |
-| **Automation (AppleEvents)** | Controlling Spotify & Apple Music playback | Optional (Home tab) |
-| **Calendars (EventKit)** | Reading upcoming macOS / Google Calendar events | Optional (Home tab) |
-| **Folder Access (Security-Scoped)** | Saving notes to an Obsidian Vault or custom folder | Optional (Focus tab) |
-
-## Requirements
-
-- macOS 14.0 (Sonoma) or newer
-- Swift 5.10+ / Xcode Command Line Tools (`xcode-select --install`)
-
-## Build & Package
+### Build from source
 
 ```bash
 git clone https://github.com/budimansusanto777/floqy.git
@@ -69,20 +50,67 @@ Build an optimized release bundle and distributable `.dmg`:
 
 ```bash
 ./scripts/build-dmg.sh
-open build/Floqy-1.0.0.dmg
+open build/Floqy-*.dmg
 ```
 
-## Roadmap
+### Requirements
 
-- [x] **Phase 0** — Repository setup, Core Notch Engine (`NSScreen` geometry, `NSPanel`, concave ears, spring states), global shortcut (`⌘⇧Space`), menu bar & Settings shell
-- [x] **Phase 1** — Daily Flow Core (`Home`: Spotify/Apple Music, EventKit Calendar, Pomodoro & Todo)
-- [x] **Phase 2** — Productivity Power Tools (`Shelf` Smart Tray, `Focus` Notes/Obsidian, `Clipboard` Manager)
-- [x] **Phase 3** — Unified `System` Tab (Memory Monitor + Local Dev Ports)
-- [x] **Phase 4** — AI Agent Notifications & Hooks (Antigravity, Gemini CLI, Claude Code + Claude Desktop quick launch)
-- [x] **Phase 5** — Custom App Icon (`.icns`), Launch at Login (`SMAppService`), Multi-Monitor Display selection, `.dmg` distribution, & UI polish
+- **Running Floqy:** macOS 14.0 (Sonoma) or newer
+- **Building from source:** Swift 5.10+ or Xcode Command Line Tools (`xcode-select --install`)
+
+## Features
+
+### Six Symmetrical Modules
+
+| Wing | Tab | Core Capabilities |
+| :--- | :--- | :--- |
+| Left | **Home** | Spotify & Apple Music playback controls + quick-launch, EventKit Calendar with 1-click Join, Pomodoro & Todo overview |
+| Left | **Shelf** | Smart Drag-and-Drop Tray, native AirDrop, image/PDF compression & WebP conversion, offline Vision OCR |
+| Left | **Focus** | Interactive click-or-drag Pomodoro Focus Timer, 4-round session counter, persistent Todo list & local/Obsidian Markdown Notes |
+| Right | **Board** | Searchable clipboard history (`⌘⇧V`) with auto-type badges, pinning, clear unpinned, and instant paste |
+| Right | **AI** | Antigravity, Gemini CLI, Claude Code & Claude Desktop hook status (`floqy://`), live activity equalizer, token summary & quick launch |
+| Right | **System** | Kernel-level Memory Pressure monitor, top RAM consumers, 1-click Quit/Purge, & local dev ports |
+| Right | **Settings (`⚙`)** | Inline theme/wallpaper selector, idle companion switcher, & hardware card toggles |
+
+### Companions, Live Activity & Themes
+
+- **Idle Companions (5 modes + Off):** Contextual **Eyes** (perspective depth scaling, cursor proximity curiosity & double-blink), pointer-reactive **Wave** (calm hairline to dual acoustic waves), breathing **Horizon** pill, plus symmetrical left/right tunnel-walking **Dog** (Floqy Poodle) and **Cat** (Calico) that follow your cursor behind the camera bezel and settle smoothly when still.
+- **Compact Live Activity & Alerts:** Surrounds the camera with live controls for **Music** (hover to reveal playback controls), **Pomodoro** countdown, **Meeting** heads-up (`in 3m` and `Starting now` + `Join`), **AI Agent** working/done celebrations, **Memory** warnings, and **Headphones / Charging ETA** cards.
+- **Themes & Custom Wallpaper:** Keeps the closed notch seamless Obsidian black, then expands into `Obsidian`, `Midnight`, `Pure White`, `Sakura Blush`, `Rose Velvet`, or a custom notch wallpaper image (`Dark` / `Light`).
+- **Multi-Monitor & Launch at Login:** Choose `Built-in Notch Display`, `Primary Display`, or `Follow Cursor`, and enable `Start Floqy at login` via macOS `SMAppService`.
+
+## Shortcuts & Permissions
+
+- `⌘⇧Space` · Toggle expanded notch
+- `⌘⇧V` · Jump straight to **Board** (Clipboard history)
+- `⌘1` – `⌘6` · Switch between `Home`, `Shelf`, `Focus`, `Board`, `AI`, and `System`
+- `Esc` · Collapse notch
+
+| Permission | Used For | Required? |
+| :--- | :--- | :--- |
+| **Automation (AppleEvents)** | Controlling & launching Spotify and Apple Music | Optional (Home tab) |
+| **Calendars (EventKit)** | Reading upcoming macOS, Google, iCloud & Exchange events | Optional (Home tab) |
+| **Folder Access (Security-Scoped)** | Saving notes to an Obsidian Vault or custom folder | Optional (Focus tab) |
+
+## FAQ
+
+**Why does macOS ask for confirmation on first launch?**
+Floqy releases are ad-hoc signed without a paid Apple Developer ID certificate. Opening **System Settings → Privacy & Security → Open Anyway** once trusts your local copy.
+
+**Does cursor tracking need Accessibility permission?**
+No. Eye gaze, acoustic wave wake-up, and Calico/Poodle tunnel walks use standard AppKit pointer events (`NSEvent` global monitor) with zero Accessibility permissions required.
+
+**Does Floqy work on external monitors without a hardware notch?**
+Yes. Floqy adapts its geometry cleanly to external screens without a camera bezel and lets you pick `Built-in Notch Display`, `Primary Display`, or `Follow Cursor` in Settings.
+
+**Is any data sent to external servers?**
+No. Floqy runs 100% locally with no analytics or telemetry. **Board** automatically skips sensitive pasteboard types (`ConcealedType`, `TransientType`, `AutoGeneratedType`, and 1Password entries).
+
+**How do AI agent hooks trigger the notch?**
+Connect supported agents from the **AI** tab in one click, or trigger events locally via URL scheme (for example `floqy://ai?agent=claude&state=working` and `state=done`).
 
 ## License
 
-Floqy is free software licensed under the **GNU General Public License v3.0 (GPLv3)**. See [LICENSE](LICENSE) for details.
+Floqy is free software licensed under the **GNU General Public License v3.0 (GPLv3)**. See [LICENSE](LICENSE) for details. Changelog history is published on [Releases](https://github.com/budimansusanto777/floqy/releases).
 
 Copyright © 2026 [budimansusanto777](https://github.com/budimansusanto777/floqy).
