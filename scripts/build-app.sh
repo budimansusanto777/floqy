@@ -91,6 +91,8 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <string>Floqy reads your upcoming calendar events and meeting links to display them inside the Home tab.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Floqy controls playback and reads track metadata from Spotify and Apple Music.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>Floqy uses your Mac camera briefly when you open Quick Camera Mirror before joining a meeting.</string>
 </dict>
 </plist>
 EOF

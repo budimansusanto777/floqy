@@ -17,7 +17,9 @@ enum CoreSelfCheck {
         checkSystemLogic()
         checkAIActivityLogic()
         checkHardwareStatusAndRestingEyesLogic()
-        print("CoreSelfCheck: 13/13 checks passed.")
+        checkUpdateLogic()
+        checkShortcutAndMirrorLogic()
+        print("CoreSelfCheck: 15/15 checks passed.")
     }
 
     private static func checkNotchedScreenDetection() {
@@ -626,6 +628,184 @@ enum CoreSelfCheck {
         precondition(taperedShape.taperedChinInset == 36, "NotchShellShape animatableData must drive taperedChinInset")
         let taperedPath = taperedShape.path(in: CGRect(origin: .zero, size: eyesIdle))
         precondition(!taperedPath.isEmpty, "Tapered mini-chin shape must produce a valid path")
+    }
+
+    private static func checkUpdateLogic() {
+        precondition(UpdateLogic.isNewer(latest: "v1.3.0", than: "1.2.0"), "Minor bump must be newer")
+        precondition(UpdateLogic.isNewer(latest: "1.10.0", than: "1.2.0"), "Multi-digit semantic version comparison must beat lexical order")
+        precondition(UpdateLogic.isNewer(latest: "2.0.0", than: "1.9.9"), "Major bump must be newer")
+        precondition(!UpdateLogic.isNewer(latest: "v1.2.0", than: "1.2.0"), "Same version must not be newer")
+        precondition(!UpdateLogic.isNewer(latest: "1.2", than: "1.2.0"), "Zero-padded equal versions must not be newer")
+        precondition(!UpdateLogic.isNewer(latest: "1.1.9", than: "1.2.0"), "Older version must not be newer")
+        precondition(!UpdateLogic.isNewer(latest: "latest", than: "1.2.0"), "Non-numeric version must be rejected")
+
+        let validJSON = """
+        {
+          "tag_name": "v1.3.0",
+          "html_url": "https://github.com/budimansusanto777/floqy/releases/tag/v1.3.0",
+          "draft": false,
+          "prerelease": false,
+          "assets": [
+            {
+              "name": "Floqy-1.3.0.dmg",
+              "digest": "sha256:D4E571439907EA45B792D60C261540B4FAAC1D8004058EAAB38FACDCCD99F871",
+              "browser_download_url": "https://github.com/budimansusanto777/floqy/releases/download/v1.3.0/Floqy-1.3.0.dmg"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let parsed = UpdateLogic.parseLatestRelease(from: validJSON)
+        precondition(parsed?.version == "1.3.0", "Parsed release version mismatch")
+        precondition(parsed?.dmgURL?.lastPathComponent == "Floqy-1.3.0.dmg", "Parsed DMG URL mismatch")
+        precondition(
+            parsed?.dmgSHA256 == "d4e571439907ea45b792d60c261540b4faac1d8004058eaab38facdccd99f871",
+            "Parsed SHA-256 digest should normalize to 64 lowercase hex characters"
+        )
+        precondition(UpdateLogic.parseSHA256Digest("sha256:abcd") == nil, "Short SHA-256 digest must be rejected")
+        precondition(UpdateLogic.parseSHA256Digest("sha256:" + String(repeating: "z", count: 64)) == nil, "Non-hex SHA-256 digest must be rejected")
+
+        let noAssetJSON = """
+        {
+          "tag_name": "v1.3.1",
+          "html_url": "https://github.com/budimansusanto777/floqy/releases/tag/v1.3.1",
+          "draft": false,
+          "prerelease": false,
+          "assets": []
+        }
+        """.data(using: .utf8)!
+        let parsedNoAsset = UpdateLogic.parseLatestRelease(from: noAssetJSON)
+        precondition(parsedNoAsset != nil && parsedNoAsset?.dmgURL == nil, "Release without DMG should fall back to releaseURL")
+
+        let prereleaseJSON = """
+        {
+          "tag_name": "v1.4.0-beta.1",
+          "html_url": "https://github.com/budimansusanto777/floqy/releases/tag/v1.4.0-beta.1",
+          "draft": false,
+          "prerelease": true,
+          "assets": []
+        }
+        """.data(using: .utf8)!
+        precondition(UpdateLogic.parseLatestRelease(from: prereleaseJSON) == nil, "Prereleases must be ignored")
+
+        let spoofedURLJSON = """
+        {
+          "tag_name": "v9.9.9",
+          "html_url": "https://evil.example.com/floqy",
+          "draft": false,
+          "prerelease": false,
+          "assets": []
+        }
+        """.data(using: .utf8)!
+        precondition(UpdateLogic.parseLatestRelease(from: spoofedURLJSON) == nil, "Non-GitHub release URL must be rejected")
+
+        let spoofedAssetJSON = """
+        {
+          "tag_name": "v1.3.2",
+          "html_url": "https://github.com/budimansusanto777/floqy/releases/tag/v1.3.2",
+          "draft": false,
+          "prerelease": false,
+          "assets": [
+            {
+              "name": "Floqy-1.3.2.dmg",
+              "browser_download_url": "http://github.com/budimansusanto777/floqy/releases/download/v1.3.2/Floqy-1.3.2.dmg"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let parsedSpoofedAsset = UpdateLogic.parseLatestRelease(from: spoofedAssetJSON)
+        precondition(parsedSpoofedAsset != nil && parsedSpoofedAsset?.dmgURL == nil && parsedSpoofedAsset?.dmgSHA256 == nil, "Insecure HTTP DMG URL must be rejected")
+
+        let fm = FileManager.default
+        let tempRoot = fm.temporaryDirectory.appendingPathComponent("FloqyUpdateCheck-\(UUID().uuidString)", isDirectory: true)
+        try? fm.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        let helloFile = tempRoot.appendingPathComponent("hello.txt")
+        try? Data("hello".utf8).write(to: helloFile)
+        let helloSHA = try? UpdateLogic.sha256Hex(of: helloFile)
+        precondition(
+            helloSHA == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+            "Streaming SHA-256 hash mismatch"
+        )
+
+        precondition(
+            UpdateLogic.canSelfInstall(bundleURL: URL(fileURLWithPath: "/Applications/Floqy.app"), isWritable: true),
+            "Writable /Applications/Floqy.app must allow self-install"
+        )
+        precondition(
+            !UpdateLogic.canSelfInstall(bundleURL: URL(fileURLWithPath: "/Applications/Floqy.app"), isWritable: false),
+            "Read-only bundle must block self-install"
+        )
+        precondition(
+            !UpdateLogic.canSelfInstall(bundleURL: URL(fileURLWithPath: "/Volumes/Floqy/Floqy.app"), isWritable: true),
+            "Mounted /Volumes bundle must block self-install"
+        )
+        precondition(
+            !UpdateLogic.canSelfInstall(bundleURL: URL(fileURLWithPath: "/private/var/folders/x/AppTranslocation/123/d/Floqy.app"), isWritable: true),
+            "AppTranslocation bundle must block self-install"
+        )
+        precondition(
+            !UpdateLogic.canSelfInstall(bundleURL: URL(fileURLWithPath: "/Users/test/Floqy"), isWritable: true),
+            "Non-.app binary must block self-install"
+        )
+
+        let stagedApp = tempRoot.appendingPathComponent("Floqy.app", isDirectory: true)
+        let macOSDir = stagedApp.appendingPathComponent("Contents/MacOS", isDirectory: true)
+        try? fm.createDirectory(at: macOSDir, withIntermediateDirectories: true)
+        let plistDict: [String: Any] = [
+            "CFBundleIdentifier": "com.budimansusanto777.floqy",
+            "CFBundleExecutable": "Floqy"
+        ]
+        if let plistData = try? PropertyListSerialization.data(fromPropertyList: plistDict, format: .xml, options: 0) {
+            try? plistData.write(to: stagedApp.appendingPathComponent("Contents/Info.plist"))
+        }
+        let execURL = macOSDir.appendingPathComponent("Floqy")
+        try? Data("#!/bin/sh\n".utf8).write(to: execURL)
+        try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: execURL.path)
+        precondition(UpdateLogic.validateStagedAppBundle(at: stagedApp), "Valid staged bundle must pass validation")
+        precondition(!UpdateLogic.validateStagedAppBundle(at: stagedApp, expectedBundleID: "com.other.app"), "Mismatched bundle ID must fail validation")
+    }
+
+    private static func checkShortcutAndMirrorLogic() {
+        let toggleDefault = ShortcutLogic.defaultBindings[.toggleNotch]
+        precondition(toggleDefault?.displayString == "⌘ ⇧ Space", "Default toggle shortcut display mismatch")
+        precondition(toggleDefault?.isValid == true, "Default toggle shortcut must be valid")
+
+        let boardDefault = ShortcutLogic.defaultBindings[.openBoard]
+        precondition(boardDefault?.displayString == "⌘ ⇧ V", "Default clipboard shortcut display mismatch")
+
+        let bareKey = GlobalShortcut(keyCode: 49, carbonModifiers: 0)
+        precondition(!bareKey.isValid, "Bare key without modifiers must be rejected")
+
+        let shiftOnlyKey = GlobalShortcut(keyCode: 0, carbonModifiers: GlobalShortcut.shiftMask)
+        precondition(!shiftOnlyKey.isValid, "Shift-only shortcut must be rejected")
+
+        let optionNote = GlobalShortcut(keyCode: 45, carbonModifiers: GlobalShortcut.optionMask)
+        precondition(optionNote.isValid && optionNote.displayString == "⌥ N", "Option+N shortcut formatting mismatch")
+
+        precondition(
+            ShortcutLogic.conflictAction(for: boardDefault!, excluding: .quickNote, in: ShortcutLogic.defaultBindings) == .openBoard,
+            "Duplicate shortcut conflict must be detected"
+        )
+        precondition(
+            ShortcutLogic.conflictAction(for: boardDefault!, excluding: .openBoard, in: ShortcutLogic.defaultBindings) == nil,
+            "Self binding should not report a conflict"
+        )
+
+        if let encoded = try? JSONEncoder().encode(ShortcutLogic.defaultBindings),
+           let decoded = try? JSONDecoder().decode([ShortcutAction: GlobalShortcut].self, from: encoded) {
+            precondition(decoded == ShortcutLogic.defaultBindings, "Shortcut bindings Codable round-trip mismatch")
+        } else {
+            preconditionFailure("Failed Codable round-trip for shortcut bindings")
+        }
+
+        let geometry = NotchGeometry(screen: nil)
+        let mirrorSize = geometry.shellSize(
+            for: .alert(.cameraMirror)
+        )
+        let expandedSize = geometry.shellSize(for: .expanded)
+        precondition(mirrorSize.width == expandedSize.width && mirrorSize.height >= 260, "Camera mirror alert shell dimensions mismatch")
+        precondition(ShortcutAction.cameraMirror.hotKeyID == 5 && ShortcutAction(hotKeyID: 5) == .cameraMirror, "Camera mirror shortcut action ID mismatch")
     }
 }
 

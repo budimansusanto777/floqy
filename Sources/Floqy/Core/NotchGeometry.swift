@@ -77,6 +77,13 @@ struct NotchGeometry: Equatable {
         return 2
     }
 
+    private var expandedShellWidth: CGFloat {
+        let rawWidth: CGFloat = hasHardwareNotch
+            ? max(596, hardwareNotchSize.width + 396)
+            : 596
+        return ceil(rawWidth / 2) * 2
+    }
+
     /// Returns the content shell size (excluding the outer concave ears) for a given notch mode and active sub-view.
     func shellSize(
         for mode: NotchMode,
@@ -116,16 +123,14 @@ struct NotchGeometry: Equatable {
                 return CGSize(width: 392, height: max(84, notchSafeTopHeight + 50))
             case .pomodoroComplete, .meetingStarting:
                 return CGSize(width: 424, height: max(86, notchSafeTopHeight + 52))
+            case .cameraMirror:
+                return CGSize(width: expandedShellWidth, height: max(300, notchSafeTopHeight + 266))
             }
         case .expanded:
-            let rawWidth: CGFloat = hasHardwareNotch
-                ? max(596, hardwareNotchSize.width + 396)
-                : 596
-            let expandedWidth = ceil(rawWidth / 2) * 2
             if activeTab == .home && homeSubView == .calendar {
-                return CGSize(width: expandedWidth, height: max(268, notchSafeTopHeight + 234))
+                return CGSize(width: expandedShellWidth, height: max(268, notchSafeTopHeight + 234))
             }
-            return CGSize(width: expandedWidth, height: max(224, notchSafeTopHeight + 190))
+            return CGSize(width: expandedShellWidth, height: max(224, notchSafeTopHeight + 190))
         }
     }
 

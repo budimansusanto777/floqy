@@ -11,6 +11,24 @@ struct MeetingHeadsUp: Equatable {
     let minutesRemaining: Int
 }
 
+enum UpdateCheckStatus: Equatable {
+    case idle
+    case checking
+    case upToDate(latestVersion: String)
+    case updateAvailable(ReleaseInfo)
+    case installing(progress: Double, stage: String)
+    case failed(String)
+
+    var isBusy: Bool {
+        switch self {
+        case .checking, .installing:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
 /// Central coordinator for notch state, hover debounce, screen geometry, global hotkeys, and module services.
 @MainActor
 final class NotchManager: ObservableObject {
@@ -24,6 +42,7 @@ final class NotchManager: ObservableObject {
     private static let displayPreferenceKey = "floqy.display.preference"
     private static let headphonesCardEnabledKey = "floqy.hardware.headphonesCardEnabled"
     private static let chargingCardEnabledKey = "floqy.hardware.chargingCardEnabled"
+    private static let shortcutBindingsKey = "floqy.shortcuts.bindings"
 
     @Published var mode: NotchMode = .idle {
         didSet {
@@ -105,6 +124,8 @@ final class NotchManager: ObservableObject {
     @Published private(set) var idleHappyUntil: Date?
     @Published private(set) var meetingHeadsUp: MeetingHeadsUp?
     @Published private(set) var geometry: NotchGeometry
+    @Published private(set) var updateStatus: UpdateCheckStatus = .idle
+    @Published private(set) var shortcutBindings: [ShortcutAction: GlobalShortcut]
 
     let music = MusicService()
     let calendar = CalendarService()
@@ -115,6 +136,7 @@ final class NotchManager: ObservableObject {
     let system = SystemMonitorService()
     let ai = AIService()
     let hardware = HardwareStatusService()
+    let cameraMirror = CameraMirrorService()
 
     var onOpenFullSettings: (() -> Void)?
 
@@ -124,6 +146,7 @@ final class NotchManager: ObservableObject {
     private var hoverTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
     private var alertAutoDismissTask: Task<Void, Never>?
+    private var updateCheckTask: Task<Void, Never>?
     private var triggeredStartingMeetingIDs: Set<String> = []
     private(set) var isHoveringCompactControls: Bool = false
     private var isTrackingMenu: Bool = false
@@ -132,8 +155,8 @@ final class NotchManager: ObservableObject {
     private var cursorScreenMonitor: Any?
     private var lastCursorScreenCheck: CFTimeInterval = 0
     private var cancellables: Set<AnyCancellable> = []
-    private var toggleHotKeyRef: EventHotKeyRef?
-    private var clipboardHotKeyRef: EventHotKeyRef?
+    private var hotKeyRefs: [ShortcutAction: EventHotKeyRef] = [:]
+    private var areHotKeysSuspended: Bool = false
     private var eventHandlerRef: EventHandlerRef?
     private var screenObserver: NSObjectProtocol?
     private var menuBeginObserver: NSObjectProtocol?
@@ -178,6 +201,12 @@ final class NotchManager: ObservableObject {
         self.wallpaperImage = NSImage(contentsOf: Self.wallpaperStorageURL)
         self.headphonesCardEnabled = UserDefaults.standard.object(forKey: Self.headphonesCardEnabledKey) as? Bool ?? true
         self.chargingCardEnabled = UserDefaults.standard.object(forKey: Self.chargingCardEnabledKey) as? Bool ?? true
+        if let savedShortcutsData = UserDefaults.standard.data(forKey: Self.shortcutBindingsKey),
+           let decoded = try? JSONDecoder().decode([ShortcutAction: GlobalShortcut].self, from: savedShortcutsData) {
+            self.shortcutBindings = decoded
+        } else {
+            self.shortcutBindings = ShortcutLogic.defaultBindings
+        }
         self.geometry = NotchGeometry(screen: NotchGeometry.preferredScreen(for: initialDisplayPref))
         NotchColors.activePreset = NotchThemePreset.resolved(for: mode, selected: initialTheme)
         refreshLaunchAtLoginStatus()
@@ -196,11 +225,8 @@ final class NotchManager: ObservableObject {
         if let menuEndObserver {
             NotificationCenter.default.removeObserver(menuEndObserver)
         }
-        if let toggleHotKeyRef {
-            UnregisterEventHotKey(toggleHotKeyRef)
-        }
-        if let clipboardHotKeyRef {
-            UnregisterEventHotKey(clipboardHotKeyRef)
+        for ref in hotKeyRefs.values {
+            UnregisterEventHotKey(ref)
         }
         if let eventHandlerRef {
             RemoveEventHandler(eventHandlerRef)
@@ -284,6 +310,13 @@ final class NotchManager: ObservableObject {
 
     func setMode(_ newMode: NotchMode) {
         hoverTask?.cancel()
+
+        if case .alert(.cameraMirror) = mode, newMode != mode {
+            cameraMirror.stop()
+            if case .cameraMirror = activeAlert {
+                activeAlert = nil
+            }
+        }
 
         if !newMode.isCompact {
             isHoveringCompactControls = false
@@ -520,8 +553,27 @@ final class NotchManager: ObservableObject {
         syncCollapsedMode()
     }
 
+    func openCameraMirror() {
+        alertAutoDismissTask?.cancel()
+        hoverTask?.cancel()
+        activeAlert = .cameraMirror
+        setMode(.alert(.cameraMirror))
+        cameraMirror.start()
+    }
+
+    func toggleCameraMirror() {
+        if case .alert(.cameraMirror) = mode {
+            dismissActiveAlert()
+        } else {
+            openCameraMirror()
+        }
+    }
+
     func dismissActiveAlert() {
         alertAutoDismissTask?.cancel()
+        if case .cameraMirror = activeAlert {
+            cameraMirror.stop()
+        }
         activeAlert = nil
         syncCollapsedMode()
     }
@@ -535,6 +587,7 @@ final class NotchManager: ObservableObject {
     }
 
     func joinMeetingFromAlert(_ url: URL) {
+        cameraMirror.stop()
         calendar.openMeeting(url)
         dismissActiveAlert()
     }
@@ -967,7 +1020,48 @@ final class NotchManager: ObservableObject {
         geometry = NotchGeometry(screen: NotchGeometry.preferredScreen(for: displayPreference))
     }
 
-    // MARK: - Global Shortcuts (Cmd+Shift+Space & Cmd+Shift+V)
+    // MARK: - Global Shortcuts
+
+    func setHotKeysSuspended(_ suspended: Bool) {
+        guard areHotKeysSuspended != suspended else { return }
+        areHotKeysSuspended = suspended
+        if suspended {
+            unregisterAllHotKeys()
+        } else {
+            reregisterAllHotKeys()
+        }
+    }
+
+    @discardableResult
+    func setShortcut(_ shortcut: GlobalShortcut?, for action: ShortcutAction) -> String? {
+        if let shortcut {
+            guard shortcut.isValid else {
+                return "Include at least one modifier (⌘, ⌥, or ⌃) with a valid key."
+            }
+            if let conflict = ShortcutLogic.conflictAction(for: shortcut, excluding: action, in: shortcutBindings) {
+                return "Already assigned to \(conflict.title)."
+            }
+            shortcutBindings[action] = shortcut
+        } else {
+            shortcutBindings.removeValue(forKey: action)
+        }
+
+        if let data = try? JSONEncoder().encode(shortcutBindings) {
+            UserDefaults.standard.set(data, forKey: Self.shortcutBindingsKey)
+        }
+        if !areHotKeysSuspended {
+            reregisterAllHotKeys()
+        }
+        return nil
+    }
+
+    func resetShortcutsToDefaults() {
+        shortcutBindings = ShortcutLogic.defaultBindings
+        UserDefaults.standard.removeObject(forKey: Self.shortcutBindingsKey)
+        if !areHotKeysSuspended {
+            reregisterAllHotKeys()
+        }
+    }
 
     private func registerGlobalHotKeys() {
         var eventType = EventTypeSpec(
@@ -992,15 +1086,7 @@ final class NotchManager: ObservableObject {
                 )
                 let manager = Unmanaged<NotchManager>.fromOpaque(userData).takeUnretainedValue()
                 Task { @MainActor in
-                    if hotKeyID.id == 2 {
-                        if manager.mode.isExpanded && manager.activeTab == .clipboard {
-                            manager.collapse()
-                        } else {
-                            manager.selectTab(.clipboard)
-                        }
-                    } else {
-                        manager.toggleExpanded()
-                    }
+                    manager.handleHotKeyTriggered(id: hotKeyID.id)
                 }
                 return noErr
             },
@@ -1011,26 +1097,223 @@ final class NotchManager: ObservableObject {
         )
 
         guard status == noErr else { return }
+        reregisterAllHotKeys()
+    }
 
+    private func handleHotKeyTriggered(id: UInt32) {
+        guard let action = ShortcutAction(hotKeyID: id) else { return }
+        switch action {
+        case .toggleNotch:
+            toggleExpanded()
+        case .openBoard:
+            if mode.isExpanded && activeTab == .clipboard {
+                collapse()
+            } else {
+                selectTab(.clipboard)
+            }
+        case .quickNote:
+            if mode.isExpanded && activeTab == .notes {
+                collapse()
+            } else {
+                selectTab(.notes)
+            }
+        case .toggleFocus:
+            productivity.togglePomodoro()
+            syncCollapsedMode()
+            if mode.isExpanded {
+                showToast(productivity.pomodoro.isRunning ? "Focus started" : "Focus paused")
+            }
+        case .cameraMirror:
+            toggleCameraMirror()
+        }
+    }
+
+    private func unregisterAllHotKeys() {
+        for ref in hotKeyRefs.values {
+            UnregisterEventHotKey(ref)
+        }
+        hotKeyRefs.removeAll()
+    }
+
+    private func reregisterAllHotKeys() {
+        unregisterAllHotKeys()
         let signature = OSType(0x464C_5159) // 'FLQY'
-        let toggleID = EventHotKeyID(signature: signature, id: 1)
-        RegisterEventHotKey(
-            UInt32(kVK_Space),
-            UInt32(cmdKey | shiftKey),
-            toggleID,
-            GetApplicationEventTarget(),
-            0,
-            &toggleHotKeyRef
-        )
+        for action in ShortcutAction.allCases {
+            guard let binding = shortcutBindings[action], binding.isValid else { continue }
+            var hotKeyRef: EventHotKeyRef?
+            let hotKeyID = EventHotKeyID(signature: signature, id: action.hotKeyID)
+            let status = RegisterEventHotKey(
+                binding.keyCode,
+                binding.carbonModifiers,
+                hotKeyID,
+                GetApplicationEventTarget(),
+                0,
+                &hotKeyRef
+            )
+            if status == noErr, let hotKeyRef {
+                hotKeyRefs[action] = hotKeyRef
+            }
+        }
+    }
 
-        let clipboardID = EventHotKeyID(signature: signature, id: 2)
-        RegisterEventHotKey(
-            UInt32(kVK_ANSI_V),
-            UInt32(cmdKey | shiftKey),
-            clipboardID,
-            GetApplicationEventTarget(),
-            0,
-            &clipboardHotKeyRef
+    // MARK: - Software Updates
+
+    func checkForUpdates(presentAlert: Bool = false) {
+        guard !updateStatus.isBusy else { return }
+        updateCheckTask?.cancel()
+        updateStatus = .checking
+
+        let currentVersion = UpdateLogic.currentAppVersion()
+        var request = URLRequest(
+            url: UpdateLogic.latestReleaseAPIURL,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: 10
         )
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("Floqy/\(currentVersion)", forHTTPHeaderField: "User-Agent")
+
+        updateCheckTask = Task { [weak self] in
+            let nextStatus: UpdateCheckStatus
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                    if http.statusCode == 403 || http.statusCode == 429 {
+                        nextStatus = .failed("GitHub rate limit reached. Try again later.")
+                    } else {
+                        nextStatus = .failed("Update server returned HTTP \(http.statusCode).")
+                    }
+                } else if let release = UpdateLogic.parseLatestRelease(from: data) {
+                    if UpdateLogic.isNewer(latest: release.version, than: currentVersion) {
+                        nextStatus = .updateAvailable(release)
+                    } else {
+                        nextStatus = .upToDate(latestVersion: release.version)
+                    }
+                } else {
+                    nextStatus = .failed("Could not read latest release metadata.")
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                nextStatus = .failed("Could not reach GitHub: \(error.localizedDescription)")
+            }
+
+            guard let self else { return }
+            self.updateCheckTask = nil
+            self.updateStatus = nextStatus
+            if presentAlert {
+                self.presentUpdateAlert(for: nextStatus, currentVersion: currentVersion)
+            }
+        }
+    }
+
+    var canSelfInstallUpdate: Bool {
+        UpdateInstaller.canSelfInstallCurrentApp()
+    }
+
+    func installAvailableUpdate(presentErrorAlert: Bool = false) {
+        guard case .updateAvailable(let release) = updateStatus else { return }
+        guard canSelfInstallUpdate, release.dmgURL != nil, release.dmgSHA256 != nil else {
+            openUpdateDownload()
+            return
+        }
+
+        updateCheckTask?.cancel()
+        updateStatus = .installing(progress: 0, stage: "Downloading v\(release.version)…")
+
+        updateCheckTask = Task { [weak self] in
+            let manager = self
+            do {
+                let stagedAppURL = try await UpdateInstaller.downloadAndStage(release: release) { [weak manager] fraction in
+                    Task { @MainActor in
+                        guard let self = manager, case .installing = self.updateStatus else { return }
+                        if fraction >= 0.999 {
+                            self.updateStatus = .installing(progress: 0.9, stage: "Verifying & unpacking…")
+                        } else {
+                            let pct = Int((fraction * 100).rounded())
+                            self.updateStatus = .installing(
+                                progress: fraction * 0.85,
+                                stage: "Downloading v\(release.version)… \(pct)%"
+                            )
+                        }
+                    }
+                }
+
+                guard let self else { return }
+                self.updateStatus = .installing(progress: 1.0, stage: "Restarting Floqy…")
+                try UpdateInstaller.replaceAndRelaunch(
+                    stagedAppURL: stagedAppURL,
+                    targetAppURL: Bundle.main.bundleURL
+                )
+                NSApp.terminate(nil)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self else { return }
+                self.updateCheckTask = nil
+                let message = error.localizedDescription
+                self.updateStatus = .failed(message)
+                if presentErrorAlert {
+                    self.presentUpdateAlert(for: .failed(message), currentVersion: UpdateLogic.currentAppVersion())
+                }
+            }
+        }
+    }
+
+    func openUpdateDownload() {
+        if case .updateAvailable(let release) = updateStatus {
+            NSWorkspace.shared.open(release.dmgURL ?? release.releaseURL)
+            return
+        }
+        NSWorkspace.shared.open(UpdateLogic.releasesPageURL)
+    }
+
+    private func presentUpdateAlert(for status: UpdateCheckStatus, currentVersion: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+
+        switch status {
+        case .updateAvailable(let release):
+            alert.alertStyle = .informational
+            alert.messageText = "Floqy v\(release.version) is available"
+            if canSelfInstallUpdate, release.dmgURL != nil, release.dmgSHA256 != nil {
+                alert.informativeText = "You are currently on v\(currentVersion). Floqy can download, verify, and restart into the new version automatically."
+                alert.addButton(withTitle: "Install & Relaunch")
+                alert.addButton(withTitle: "Download DMG")
+                alert.addButton(withTitle: "Later")
+                let response = alert.runModal()
+                if response == .alertFirstButtonReturn {
+                    installAvailableUpdate(presentErrorAlert: true)
+                } else if response == .alertSecondButtonReturn {
+                    openUpdateDownload()
+                }
+            } else {
+                alert.informativeText = "You are currently on v\(currentVersion). Download the latest DMG from GitHub?"
+                alert.addButton(withTitle: "Download DMG")
+                alert.addButton(withTitle: "Later")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    openUpdateDownload()
+                }
+            }
+
+        case .upToDate(let version):
+            alert.alertStyle = .informational
+            alert.messageText = "Floqy is up to date"
+            alert.informativeText = "You are running the latest version (v\(version))."
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+
+        case .failed(let message):
+            alert.alertStyle = .warning
+            alert.messageText = "Could not check for updates"
+            alert.informativeText = message
+            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: "Open Releases")
+            if alert.runModal() == .alertSecondButtonReturn {
+                NSWorkspace.shared.open(UpdateLogic.releasesPageURL)
+            }
+
+        case .idle, .checking, .installing:
+            break
+        }
     }
 }

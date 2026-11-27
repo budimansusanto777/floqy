@@ -246,8 +246,15 @@ struct NotchCompactView: View {
 struct NotchAlertView: View {
     @ObservedObject var manager: NotchManager
     let alert: NotchAlert
+    @ObservedObject private var cameraMirror: CameraMirrorService
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var iconPopped = false
+
+    init(manager: NotchManager, alert: NotchAlert) {
+        self.manager = manager
+        self.alert = alert
+        self._cameraMirror = ObservedObject(wrappedValue: manager.cameraMirror)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -257,6 +264,8 @@ struct NotchAlertView: View {
             Group {
                 if case .chargingConnected(let batteryPercent, let etaText) = alert {
                     chargingTelemetryCard(batteryPercent: batteryPercent, etaText: etaText)
+                } else if case .cameraMirror = alert {
+                    cameraMirrorCard()
                 } else {
                     HStack(spacing: 10) {
                         alertBadge
@@ -278,6 +287,8 @@ struct NotchAlertView: View {
                     manager.dismissActiveAlert()
                 case .pomodoroComplete, .meetingStarting:
                     manager.setMode(.expanded)
+                case .cameraMirror:
+                    break
                 }
             }
         }
@@ -286,6 +297,116 @@ struct NotchAlertView: View {
                 withAnimation(.spring(response: 0.38, dampingFraction: 0.62)) {
                     iconPopped = true
                 }
+            }
+        }
+        .onDisappear {
+            if case .cameraMirror = alert {
+                manager.cameraMirror.stop()
+            }
+        }
+    }
+
+    private func cameraMirrorCard() -> some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "camera.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(cameraMirror.isRunning ? NotchColors.statusHealthy : NotchColors.accentPrimary)
+                Text("Camera Mirror")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(NotchColors.textPrimary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                Button {
+                    cameraMirror.isMirrored.toggle()
+                } label: {
+                    Image(systemName: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(cameraMirror.isMirrored ? NotchColors.accentPrimary : NotchColors.textSecondary)
+                        .frame(width: 24, height: 22)
+                }
+                .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6, isSelected: cameraMirror.isMirrored))
+                .accessibilityLabel("Flip camera mirror")
+                .help("Toggle horizontal mirror")
+
+                Button {
+                    manager.dismissActiveAlert()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(NotchColors.textSecondary)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                .accessibilityLabel("Close camera mirror")
+            }
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Color.black.opacity(0.45))
+
+                if cameraMirror.errorMessage == nil {
+                    CameraPreviewLayerView(
+                        session: cameraMirror.session,
+                        isMirrored: cameraMirror.isMirrored
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+                    // Subtle framing guide
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(
+                            Color.white.opacity(0.18),
+                            style: StrokeStyle(lineWidth: 1, dash: [5, 5])
+                        )
+                        .padding(.horizontal, 110)
+                        .padding(.vertical, 14)
+                        .allowsHitTesting(false)
+                } else if let error = cameraMirror.errorMessage {
+                    VStack(spacing: 8) {
+                        Image(systemName: "video.slash")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(NotchColors.textSecondary)
+                        Text(error)
+                            .font(.system(size: 11))
+                            .foregroundStyle(NotchColors.textSecondary)
+                            .multilineTextAlignment(.center)
+                        if cameraMirror.authorizationStatus == .denied || cameraMirror.authorizationStatus == .restricted {
+                            Button("Open Camera Privacy") {
+                                cameraMirror.openCameraPrivacySettings()
+                            }
+                            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(NotchColors.accentPrimary)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                        }
+                    }
+                    .padding(12)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(NotchColors.cardBorder, lineWidth: 1)
+            )
+
+            HStack(spacing: 8) {
+                Text(cameraMirror.isMirrored ? "Mirrored preview" : "Standard preview")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(NotchColors.textSecondary)
+
+                Spacer(minLength: 4)
+
+                Button("Done") {
+                    manager.dismissActiveAlert()
+                }
+                .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 7))
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(NotchColors.textPrimary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
             }
         }
     }
@@ -434,7 +555,7 @@ struct NotchAlertView: View {
                                 .stroke(NotchColors.cardBorder, lineWidth: 1)
                         )
                 )
-        case .chargingConnected:
+        case .chargingConnected, .cameraMirror:
             EmptyView()
         }
     }
@@ -486,7 +607,7 @@ struct NotchAlertView: View {
                     .foregroundStyle(NotchColors.textSecondary)
                     .lineLimit(1)
             }
-        case .chargingConnected:
+        case .chargingConnected, .cameraMirror:
             EmptyView()
         }
     }
@@ -569,7 +690,7 @@ struct NotchAlertView: View {
                     .padding(.vertical, 4)
                     .background(Capsule().fill(NotchColors.statusHealthy.opacity(0.14)))
             }
-        case .chargingConnected:
+        case .chargingConnected, .cameraMirror:
             EmptyView()
         }
     }

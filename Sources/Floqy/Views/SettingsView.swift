@@ -1,3 +1,4 @@
+import AppKit
 import EventKit
 import SwiftUI
 
@@ -7,6 +8,10 @@ struct SettingsView: View {
     @ObservedObject private var calendar: CalendarService
     @ObservedObject private var obsidian: ObsidianService
     @ObservedObject private var productivity: ProductivityService
+
+    @State private var recordingAction: ShortcutAction?
+    @State private var shortcutFeedback: String?
+    @State private var keyMonitor: Any?
 
     init(manager: NotchManager) {
         self.manager = manager
@@ -83,21 +88,37 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            }
 
-                LabeledContent("Toggle Notch") {
-                    Text("⌘ ⇧ Space")
-                        .font(.system(.body, design: .monospaced))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(.quaternary))
+            Section("Keyboard Shortcuts") {
+                ForEach(ShortcutAction.allCases) { action in
+                    ShortcutRecorderRow(
+                        action: action,
+                        binding: manager.shortcutBindings[action],
+                        isRecording: recordingAction == action,
+                        onToggleRecord: {
+                            toggleShortcutRecording(for: action)
+                        }
+                    )
                 }
 
-                LabeledContent("Copy History") {
-                    Text("⌘ ⇧ V")
-                        .font(.system(.body, design: .monospaced))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(.quaternary))
+                if let shortcutFeedback {
+                    Text(shortcutFeedback)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                } else {
+                    Text("Click a shortcut and press a new key combination. Esc cancels, Delete clears.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    Spacer()
+                    Button("Reset Defaults") {
+                        stopShortcutRecording()
+                        shortcutFeedback = nil
+                        manager.resetShortcutsToDefaults()
+                    }
                 }
             }
 
@@ -199,13 +220,121 @@ struct SettingsView: View {
             }
 
             Section("About Floqy") {
-                LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.2.0")
+                LabeledContent("Version", value: UpdateLogic.currentAppVersion())
+                LabeledContent("Software Update") {
+                    HStack(spacing: 8) {
+                        Button(manager.updateStatus == .checking ? "Checking…" : "Check for Updates") {
+                            manager.checkForUpdates(presentAlert: false)
+                        }
+                        .disabled(manager.updateStatus.isBusy)
+
+                        if case .updateAvailable(let release) = manager.updateStatus {
+                            if manager.canSelfInstallUpdate, release.dmgURL != nil, release.dmgSHA256 != nil {
+                                Button("Install & Relaunch") {
+                                    manager.installAvailableUpdate()
+                                }
+                                .buttonStyle(.borderedProminent)
+
+                                Button("DMG") {
+                                    manager.openUpdateDownload()
+                                }
+                            } else {
+                                Button("Download") {
+                                    manager.openUpdateDownload()
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
+                        }
+                    }
+                }
+                switch manager.updateStatus {
+                case .updateAvailable(let release):
+                    Text("Floqy v\(release.version) is available on GitHub.")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                case .installing(let progress, let stage):
+                    VStack(alignment: .leading, spacing: 4) {
+                        ProgressView(value: progress)
+                        Text(stage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                case .upToDate(let latestVersion):
+                    Text("You are up to date (v\(latestVersion)).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                case .failed(let message):
+                    HStack {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Open Releases") {
+                            manager.openUpdateDownload()
+                        }
+                    }
+                case .idle, .checking:
+                    EmptyView()
+                }
                 LabeledContent("License", value: "GNU GPLv3")
                 LabeledContent("Copyright", value: "© 2026 budimansusanto777")
             }
         }
         .formStyle(.grouped)
         .frame(width: 440, height: 550)
+        .onDisappear {
+            stopShortcutRecording()
+        }
+    }
+
+    private func toggleShortcutRecording(for action: ShortcutAction) {
+        if recordingAction == action {
+            stopShortcutRecording()
+            return
+        }
+        stopShortcutRecording()
+        recordingAction = action
+        shortcutFeedback = nil
+        manager.setHotKeysSuspended(true)
+
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let code = UInt32(event.keyCode)
+            if code == 53 { // Escape
+                stopShortcutRecording()
+                return nil
+            }
+            if code == 51 || code == 117 { // Delete / Forward Delete
+                manager.setShortcut(nil, for: action)
+                shortcutFeedback = nil
+                stopShortcutRecording()
+                return nil
+            }
+
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            var carbonMods: UInt32 = 0
+            if flags.contains(.command) { carbonMods |= GlobalShortcut.cmdMask }
+            if flags.contains(.shift) { carbonMods |= GlobalShortcut.shiftMask }
+            if flags.contains(.option) { carbonMods |= GlobalShortcut.optionMask }
+            if flags.contains(.control) { carbonMods |= GlobalShortcut.controlMask }
+
+            let candidate = GlobalShortcut(keyCode: code, carbonModifiers: carbonMods)
+            if let error = manager.setShortcut(candidate, for: action) {
+                shortcutFeedback = error
+            } else {
+                shortcutFeedback = nil
+                stopShortcutRecording()
+            }
+            return nil
+        }
+    }
+
+    private func stopShortcutRecording() {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
+        recordingAction = nil
+        manager.setHotKeysSuspended(false)
     }
 
     private var eventKitStatusLabel: String {
@@ -218,6 +347,35 @@ struct SettingsView: View {
             return "Denied"
         default:
             return "Unavailable"
+        }
+    }
+}
+
+private struct ShortcutRecorderRow: View {
+    let action: ShortcutAction
+    let binding: GlobalShortcut?
+    let isRecording: Bool
+    let onToggleRecord: () -> Void
+
+    var body: some View {
+        LabeledContent(action.title) {
+            Button(action: onToggleRecord) {
+                Text(isRecording ? "Press keys…" : (binding?.displayString ?? "Not Set"))
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(isRecording ? .white : (binding != nil ? .primary : .secondary))
+                    .frame(minWidth: 96)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(isRecording ? Color.accentColor : Color.secondary.opacity(0.16))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(isRecording ? Color.accentColor : Color.clear, lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
         }
     }
 }

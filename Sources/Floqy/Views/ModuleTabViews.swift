@@ -71,7 +71,7 @@ struct HomeTabView: View {
             VStack(spacing: 8) {
                 calendarCard
 
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     pomodoroTile
                     wingTile(
                         title: "\(productivity.todos.filter { !$0.isDone }.count) todo",
@@ -87,6 +87,7 @@ struct HomeTabView: View {
                     ) {
                         manager.selectTab(.system)
                     }
+                    mirrorTile
                 }
                 .frame(height: 38)
             }
@@ -725,7 +726,7 @@ struct HomeTabView: View {
         Button {
             productivity.togglePomodoro()
         } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: 4) {
                 Image(systemName: productivity.pomodoro.isRunning ? "pause.fill" : "timer")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(NotchColors.focusAccent)
@@ -733,8 +734,9 @@ struct HomeTabView: View {
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(NotchColors.textPrimary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.88)
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 10)
@@ -749,6 +751,28 @@ struct HomeTabView: View {
         .accessibilityLabel(productivity.pomodoro.isRunning ? "Pause Pomodoro" : "Start Pomodoro")
     }
 
+    private var mirrorTile: some View {
+        Button {
+            manager.openCameraMirror()
+        } label: {
+            Image(systemName: "camera.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(NotchColors.accentPrimary)
+                .frame(width: 38, height: 38)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(NotchColors.cardSurface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(NotchColors.cardBorder, lineWidth: 1)
+                        )
+                )
+        }
+        .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 10))
+        .accessibilityLabel("Camera Mirror")
+        .help("Camera Mirror")
+    }
+
     private func wingTile(
         title: String,
         icon: String,
@@ -756,7 +780,7 @@ struct HomeTabView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 5) {
+            HStack(spacing: 4) {
                 Image(systemName: icon)
                     .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(color)
@@ -764,8 +788,9 @@ struct HomeTabView: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(NotchColors.textPrimary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.88)
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 10)

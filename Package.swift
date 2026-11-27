@@ -30,7 +30,8 @@ let package = Package(
                 .linkedFramework("UniformTypeIdentifiers"),
                 .linkedFramework("IOKit"),
                 .linkedFramework("CoreAudio"),
-                .linkedFramework("ServiceManagement")
+                .linkedFramework("ServiceManagement"),
+                .linkedFramework("AVFoundation")
             ]
         )
     ]
