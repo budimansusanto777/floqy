@@ -32,9 +32,19 @@ struct NotchCompactView: View {
     }
 
     private var singleSlotBody: some View {
-        HStack(spacing: 0) {
-            leftWing
-                .frame(maxWidth: .infinity, alignment: .leading)
+        let isPermissionShortcut = activity == .ai && ai.workingState == .permission
+        return HStack(spacing: 0) {
+            Button {
+                manager.openCompactActivity(activity)
+            } label: {
+                leftWing
+                    .padding(.horizontal, 4)
+                    .frame(height: 24, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+            .accessibilityLabel("Open \(activity.displayName)")
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Spacer()
                 .frame(width: manager.geometry.notchCenterGapWidth)
@@ -42,11 +52,21 @@ struct NotchCompactView: View {
             rightWing
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
+        .onHover { hovering in
+            if !hovering || isPermissionShortcut {
+                manager.setHoveringCompactControls(hovering)
+            }
+        }
+        .onDisappear {
+            if isPermissionShortcut {
+                manager.setHoveringCompactControls(false)
+            }
+        }
         .onTapGesture {
-            manager.selectTab(activity.targetTab)
+            manager.openCompactActivity(activity)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Compact \(activity.displayName) activity. Tap to expand.")
@@ -58,25 +78,39 @@ struct NotchCompactView: View {
         right: CompactActivity,
         hidden: [CompactActivity]
     ) -> some View {
-        HStack(spacing: 0) {
-            Button {
-                manager.selectTab(left.targetTab)
-            } label: {
-                dualSlotContent(for: left, isCompactRight: false)
-                    .padding(.horizontal, 4)
-                    .frame(height: 24, alignment: .leading)
+        let protectLeftHover = left == .ai && ai.workingState == .permission
+        let protectRightHover = !hidden.isEmpty || (right == .ai && ai.workingState == .permission)
+        return HStack(spacing: 0) {
+            Group {
+                if left == .music {
+                    dualSlotMusicWing()
+                } else {
+                    Button {
+                        manager.openCompactActivity(left)
+                    } label: {
+                        dualSlotContent(for: left, isCompactRight: false)
+                            .padding(.horizontal, 4)
+                            .frame(height: 24, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                    .accessibilityLabel("Open \(left.displayName)")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
+                    .onHover { hovering in
+                        if !hovering || protectLeftHover {
+                            manager.setHoveringCompactControls(hovering)
+                        }
+                    }
+                }
             }
-            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
-            .accessibilityLabel("Open \(left.displayName)")
-            .frame(maxWidth: .infinity, alignment: .leading)
 
             Spacer()
                 .frame(width: manager.geometry.notchCenterGapWidth)
 
             HStack(spacing: 4) {
                 Button {
-                    manager.selectTab(right.targetTab)
+                    manager.openCompactActivity(right)
                 } label: {
                     dualSlotContent(for: right, isCompactRight: !hidden.isEmpty)
                         .padding(.horizontal, 4)
@@ -108,7 +142,7 @@ struct NotchCompactView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
             .contentShape(Rectangle())
             .onHover { hovering in
-                if !hovering || !hidden.isEmpty {
+                if !hovering || protectRightHover {
                     manager.setHoveringCompactControls(hovering)
                 }
             }
@@ -118,6 +152,108 @@ struct NotchCompactView: View {
         }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func dualSlotMusicWing() -> some View {
+        HStack(spacing: 4) {
+            Button {
+                manager.openCompactActivity(.music)
+            } label: {
+                Group {
+                    if let artwork = music.artworkImage {
+                        Image(nsImage: artwork)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 15, height: 15)
+                            .clipShape(RoundedRectangle(cornerRadius: 3.5))
+                    } else {
+                        Image(systemName: "music.note")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(NotchColors.accentPrimary)
+                            .frame(width: 15, height: 15)
+                    }
+                }
+            }
+            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 4))
+            .accessibilityLabel("Open Home for Music")
+
+            ZStack(alignment: .leading) {
+                HStack(spacing: 4) {
+                    Text(music.track?.title ?? "Music")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(NotchColors.textPrimary)
+                        .lineLimit(1)
+                    EqualizerBarsView(isPlaying: music.track?.isPlaying == true, barCount: 3)
+                        .frame(height: 10)
+                }
+                .opacity(isHoveringMusicControls ? 0 : 1)
+                .scaleEffect((!reduceMotion && isHoveringMusicControls) ? 0.92 : 1)
+                .allowsHitTesting(!isHoveringMusicControls)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    manager.openCompactActivity(.music)
+                }
+
+                compactMusicPlaybackButtons
+                    .opacity(isHoveringMusicControls ? 1 : 0)
+                    .scaleEffect((!reduceMotion && !isHoveringMusicControls) ? 0.92 : 1)
+                    .allowsHitTesting(isHoveringMusicControls)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 3)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .animation(
+            reduceMotion ? .easeInOut(duration: 0.12) : .easeOut(duration: 0.16),
+            value: isHoveringMusicControls
+        )
+        .onHover { hovering in
+            isHoveringMusicControls = hovering
+            manager.setHoveringCompactControls(hovering)
+        }
+        .onDisappear {
+            isHoveringMusicControls = false
+            manager.setHoveringCompactControls(false)
+        }
+    }
+
+    @ViewBuilder
+    private var compactMusicPlaybackButtons: some View {
+        HStack(spacing: 2) {
+            Button {
+                music.previousTrack()
+            } label: {
+                Image(systemName: "backward.fill")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(NotchColors.textSecondary)
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
+            .accessibilityLabel("Previous track")
+
+            Button {
+                music.togglePlayPause()
+            } label: {
+                Image(systemName: music.track?.isPlaying == true ? "pause.fill" : "play.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NotchColors.textPrimary)
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
+            .accessibilityLabel(music.track?.isPlaying == true ? "Pause" : "Play")
+
+            Button {
+                music.nextTrack()
+            } label: {
+                Image(systemName: "forward.fill")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(NotchColors.textSecondary)
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
+            .accessibilityLabel("Next track")
+        }
     }
 
     @ViewBuilder
@@ -169,17 +305,51 @@ struct NotchCompactView: View {
                     .fixedSize(horizontal: true, vertical: false)
             }
         case .ai:
-            HStack(spacing: 4) {
-                Image(systemName: "triangle")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(NotchColors.accentPrimary)
-                Text(ai.workingAgent?.shortName ?? "AI")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(NotchColors.textPrimary)
-                    .lineLimit(1)
-                if !isCompactRight && ai.workingAgent != nil {
-                    EqualizerBarsView(isPlaying: true, barCount: 3)
-                        .frame(height: 10)
+            if ai.activeSessions.count >= 2 {
+                let primary = ai.primarySession ?? ai.activeSessions[0]
+                HStack(spacing: 4) {
+                    HStack(spacing: 2) {
+                        ForEach(ai.activeSessions.prefix(2)) { session in
+                            let phase: AIPetPhase = session.state == .permission ? .permission : .working
+                            FloqyAIPetSpriteView(agent: session.agent, phase: phase, size: 16)
+                        }
+                    }
+                    if primary.state == .permission {
+                        Text("Needs you")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(FloqyAIPetSpriteView.accentColor(for: primary.agent))
+                            .lineLimit(1)
+                    } else {
+                        AIElapsedDurationText(startedAt: primary.startedAt, agent: primary.agent, style: .compact)
+                    }
+                }
+            } else if let agent = ai.workingAgent {
+                let petPhase: AIPetPhase = ai.workingState == .permission ? .permission : .working
+                HStack(spacing: 4) {
+                    FloqyAIPetSpriteView(agent: agent, phase: petPhase, size: 17)
+                    if ai.workingState == .permission {
+                        Text("Needs you")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(FloqyAIPetSpriteView.accentColor(for: agent))
+                            .lineLimit(1)
+                    } else if let startedAt = ai.workingStartedAt {
+                        AIElapsedDurationText(startedAt: startedAt, agent: agent, style: .compact)
+                    } else {
+                        Text(agent.shortName)
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(NotchColors.textPrimary)
+                            .lineLimit(1)
+                    }
+                }
+            } else {
+                HStack(spacing: 4) {
+                    Image(systemName: "triangle")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(NotchColors.accentPrimary)
+                    Text("AI")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(NotchColors.textPrimary)
+                        .lineLimit(1)
                 }
             }
         case .meeting:
@@ -270,14 +440,27 @@ struct NotchCompactView: View {
                     .lineLimit(1)
             }
         case .ai:
-            HStack(spacing: 6) {
-                Image(systemName: "triangle")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(NotchColors.accentPrimary)
-                Text(ai.workingAgent?.shortName ?? "Floqy AI")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(NotchColors.textPrimary)
-                    .lineLimit(1)
+            if ai.activeSessions.count >= 2 {
+                concurrentAISessionSlot(ai.activeSessions[0], extraOverflow: 0)
+            } else if let agent = ai.workingAgent {
+                let petPhase: AIPetPhase = ai.workingState == .permission ? .permission : .working
+                HStack(spacing: 6) {
+                    FloqyAIPetSpriteView(agent: agent, phase: petPhase, size: 20)
+                    Text(agent.shortName)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(NotchColors.textPrimary)
+                        .lineLimit(1)
+                }
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "triangle")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(NotchColors.accentPrimary)
+                    Text("Floqy AI")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(NotchColors.textPrimary)
+                        .lineLimit(1)
+                }
             }
         case .memory:
             let memColor = system.snapshot.pressureLevel == .critical ? NotchColors.statusAlert : NotchColors.statusWarning
@@ -304,43 +487,10 @@ struct NotchCompactView: View {
                     .scaleEffect((!reduceMotion && isHoveringMusicControls) ? 0.9 : 1)
                     .allowsHitTesting(false)
 
-                HStack(spacing: 2) {
-                    Button {
-                        music.previousTrack()
-                    } label: {
-                        Image(systemName: "backward.fill")
-                            .font(.system(size: 9.5, weight: .semibold))
-                            .foregroundStyle(NotchColors.textSecondary)
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
-                    .accessibilityLabel("Previous track")
-
-                    Button {
-                        music.togglePlayPause()
-                    } label: {
-                        Image(systemName: music.track?.isPlaying == true ? "pause.fill" : "play.fill")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(NotchColors.textPrimary)
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
-                    .accessibilityLabel(music.track?.isPlaying == true ? "Pause" : "Play")
-
-                    Button {
-                        music.nextTrack()
-                    } label: {
-                        Image(systemName: "forward.fill")
-                            .font(.system(size: 9.5, weight: .semibold))
-                            .foregroundStyle(NotchColors.textSecondary)
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
-                    .accessibilityLabel("Next track")
-                }
-                .opacity(isHoveringMusicControls ? 1 : 0)
-                .scaleEffect((!reduceMotion && !isHoveringMusicControls) ? 0.92 : 1)
-                .allowsHitTesting(isHoveringMusicControls)
+                compactMusicPlaybackButtons
+                    .opacity(isHoveringMusicControls ? 1 : 0)
+                    .scaleEffect((!reduceMotion && !isHoveringMusicControls) ? 0.92 : 1)
+                    .allowsHitTesting(isHoveringMusicControls)
             }
             .frame(width: 68, height: 24, alignment: .trailing)
             .contentShape(Rectangle())
@@ -381,30 +531,65 @@ struct NotchCompactView: View {
                     )
             }
         case .ai:
-            HStack(spacing: 5) {
-                if manager.idleAppearance == .dog && ai.workingAgent != nil {
-                    FloqyPoodleMascotView(mode: .working, width: 28, showSparks: true)
-                    EqualizerBarsView(isPlaying: true, barCount: 3)
-                        .frame(height: 11)
-                } else if manager.idleAppearance == .cat && ai.workingAgent != nil {
-                    FloqyCalicoMascotView(mode: .working, width: 28, showSparks: true)
-                    EqualizerBarsView(isPlaying: true, barCount: 3)
-                        .frame(height: 11)
-                } else {
-                    Text(ai.workingAgent != nil ? "Working" : "Ready")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(ai.workingAgent != nil ? NotchColors.accentPrimary : NotchColors.statusHealthy)
-                    if ai.workingAgent != nil {
-                        EqualizerBarsView(isPlaying: true, barCount: 3)
-                            .frame(height: 11)
+            if ai.activeSessions.count >= 2 {
+                concurrentAISessionSlot(
+                    ai.activeSessions[1],
+                    extraOverflow: max(0, ai.activeSessions.count - 2)
+                )
+            } else if let agent = ai.workingAgent {
+                let accent = FloqyAIPetSpriteView.accentColor(for: agent)
+                HStack(spacing: 5) {
+                    if ai.workingState == .permission {
+                        Text("Needs you")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(accent)
+                    } else if let startedAt = ai.workingStartedAt {
+                        AIElapsedDurationText(startedAt: startedAt, agent: agent, style: .detailed)
+                    } else {
+                        Text("Thinking")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(accent)
                     }
                 }
+            } else {
+                Text("Ready")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(NotchColors.statusHealthy)
             }
         case .memory:
             let memColor = system.snapshot.pressureLevel == .critical ? NotchColors.statusAlert : NotchColors.statusWarning
             Text("\(system.snapshot.usedPercent)%")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(memColor)
+        }
+    }
+
+    @ViewBuilder
+    private func concurrentAISessionSlot(_ session: ActiveAISession, extraOverflow: Int) -> some View {
+        let phase: AIPetPhase = session.state == .permission ? .permission : .working
+        let accent = FloqyAIPetSpriteView.accentColor(for: session.agent)
+        HStack(spacing: 4) {
+            FloqyAIPetSpriteView(agent: session.agent, phase: phase, size: 17)
+            Text(session.agent.shortName)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(NotchColors.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+            if session.state == .permission {
+                Text("?")
+                    .font(.system(size: 10.5, weight: .black, design: .monospaced))
+                    .foregroundStyle(accent)
+            } else {
+                AIElapsedDurationText(startedAt: session.startedAt, agent: session.agent, style: .compact)
+            }
+            if extraOverflow > 0 {
+                Text("+\(extraOverflow)")
+                    .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(NotchColors.textPrimary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.white.opacity(0.14)))
+            }
         }
     }
 }
@@ -519,19 +704,10 @@ struct NotchAlertView: View {
                 if cameraMirror.errorMessage == nil {
                     CameraPreviewLayerView(
                         session: cameraMirror.session,
-                        isMirrored: cameraMirror.isMirrored
+                        isMirrored: cameraMirror.isMirrored,
+                        isRunning: cameraMirror.isRunning
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-
-                    // Subtle framing guide
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(
-                            Color.white.opacity(0.18),
-                            style: StrokeStyle(lineWidth: 1, dash: [5, 5])
-                        )
-                        .padding(.horizontal, 110)
-                        .padding(.vertical, 14)
-                        .allowsHitTesting(false)
                 } else if let error = cameraMirror.errorMessage {
                     VStack(spacing: 8) {
                         Image(systemName: "video.slash")
@@ -673,14 +849,6 @@ struct NotchAlertView: View {
         }
     }
 
-    private func accentColor(for agent: AIAgentKind) -> Color {
-        switch agent {
-        case .antigravity: return NotchColors.accentPrimary
-        case .geminiCLI: return NotchColors.statusHealthy
-        case .claudeCode, .claudeDesktop: return NotchColors.focusAccent
-        }
-    }
-
     @ViewBuilder
     private var alertBadge: some View {
         switch alert {
@@ -729,36 +897,7 @@ struct NotchAlertView: View {
                         )
                 )
         case .aiFinished(let agent):
-            if manager.idleAppearance == .dog {
-                FloqyPoodleMascotView(
-                    mode: .done,
-                    width: 42,
-                    showSparks: true,
-                    isCelebrating: iconPopped
-                )
-            } else if manager.idleAppearance == .cat {
-                FloqyCalicoMascotView(
-                    mode: .done,
-                    width: 44,
-                    showSparks: true,
-                    isCelebrating: iconPopped
-                )
-            } else {
-                let accent = accentColor(for: agent)
-                Image(systemName: "triangle")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(accent)
-                    .symbolEffect(.bounce, value: iconPopped)
-                    .frame(width: 32, height: 32)
-                    .background(
-                        RoundedRectangle(cornerRadius: 9)
-                            .fill(accent.opacity(0.16))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 9)
-                                    .stroke(accent.opacity(0.35), lineWidth: 1)
-                            )
-                    )
-            }
+            FloqyAIPetSpriteView(agent: agent, phase: .done, size: 34)
         case .headphonesConnected(_, _, let isAirPods):
             Image(systemName: isAirPods ? "airpodspro" : "headphones")
                 .font(.system(size: 15, weight: .medium))
@@ -877,9 +1016,22 @@ struct NotchAlertView: View {
                 .accessibilityLabel("Dismiss meeting notification")
             }
         case .aiFinished:
-            Text("now")
-                .font(.system(size: 10.5, design: .monospaced))
-                .foregroundStyle(NotchColors.textSecondary)
+            if let duration = manager.ai.lastCompletedDurationSeconds {
+                Text(AIActivityLogic.formatElapsedSeconds(duration))
+                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundStyle(NotchColors.statusHealthy)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(NotchColors.statusHealthy.opacity(0.14)))
+            } else {
+                Text("Done!")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(NotchColors.statusHealthy)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(NotchColors.statusHealthy.opacity(0.14)))
+            }
         case .headphonesConnected(_, let batteryPercent, _):
             if let batteryPercent {
                 let fraction = CGFloat(min(100, max(0, batteryPercent))) / 100.0
@@ -943,5 +1095,55 @@ struct EqualizerBarsView: View {
         let phase = Double(index) * 1.35
         let wave = (sin(time * speed + phase) + 1) * 0.5
         return 5.5 + CGFloat(wave) * 8.5
+    }
+}
+
+private struct AIElapsedDurationText: View {
+    enum Style {
+        case compact
+        case detailed
+    }
+
+    let startedAt: Date
+    let agent: AIAgentKind
+    let style: Style
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.periodic(from: startedAt, by: 1)) { context in
+            let elapsed = max(0, Int(context.date.timeIntervalSince(startedAt)))
+            let accent = FloqyAIPetSpriteView.accentColor(for: agent)
+            let formatted = AIActivityLogic.formatElapsedSeconds(elapsed)
+
+            if style == .compact {
+                Text(formatted)
+                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundStyle(accent)
+                    .fixedSize(horizontal: true, vertical: false)
+            } else {
+                let verb = statusVerb(elapsed: elapsed)
+                HStack(spacing: 4) {
+                    if !verb.isEmpty {
+                        Text(verb)
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(accent)
+                            .lineLimit(1)
+                    }
+                    Text(formatted)
+                        .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(NotchColors.textSecondary)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+        }
+    }
+
+    private func statusVerb(elapsed: Int) -> String {
+        if reduceMotion { return "Working" }
+        let frames = ["Working.", "Working..", "Working..."]
+        return frames[elapsed % frames.count]
     }
 }

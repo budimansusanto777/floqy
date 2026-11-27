@@ -5,10 +5,19 @@ import Foundation
 /// Tracks AI agent hook notifications, installs official JSON hooks non-destructively, and summarizes today's local usage.
 @MainActor
 final class AIService: ObservableObject {
-    @Published private(set) var workingAgent: AIAgentKind?
+    @Published private(set) var activeSessions: [ActiveAISession] = []
+    @Published private(set) var lastCompletedDurationSeconds: Int?
     @Published private(set) var hookStatus: [AIAgentKind: Bool] = [:]
     @Published private(set) var recentCompletions: [AICompletionRecord] = []
     @Published private(set) var claudeUsageToday: LocalTokenUsageSummary?
+
+    var primarySession: ActiveAISession? {
+        activeSessions.first(where: { $0.state == .permission }) ?? activeSessions.first
+    }
+
+    var workingAgent: AIAgentKind? { primarySession?.agent }
+    var workingState: AIAgentEventState? { primarySession?.state }
+    var workingStartedAt: Date? { primarySession?.startedAt }
 
     var onAgentFinished: ((AIAgentKind) -> Void)?
     var onStateChanged: (() -> Void)?
@@ -25,7 +34,7 @@ final class AIService: ObservableObject {
         let summary: LocalTokenUsageSummary
     }
 
-    private var workingTimeoutTask: Task<Void, Never>?
+    private var workingTimeoutTasks: [AIAgentKind: Task<Void, Never>] = [:]
     private let activityStorageURL: URL
     private var dailyCounts: [String: Int] = [:]
     private var dailyCountDayKey: String = CalendarLogic.dayKey(for: Date())
@@ -43,8 +52,11 @@ final class AIService: ObservableObject {
     }
 
     func stop() {
-        workingTimeoutTask?.cancel()
-        workingTimeoutTask = nil
+        for task in workingTimeoutTasks.values {
+            task.cancel()
+        }
+        workingTimeoutTasks.removeAll()
+        activeSessions.removeAll()
     }
 
     func todayCount(for agent: AIAgentKind) -> Int {
@@ -53,17 +65,18 @@ final class AIService: ObservableObject {
     }
 
     func handleEvent(_ event: AIAgentEvent) {
+        let result = AIActivityLogic.applyEvent(event, to: activeSessions, now: Date())
+        activeSessions = result.sessions
+
         switch event.state {
-        case .working:
-            workingAgent = event.agent
-            scheduleWorkingSafetyClear()
+        case .working, .permission:
+            scheduleWorkingSafetyClear(for: event.agent)
             onStateChanged?()
 
         case .done:
-            workingTimeoutTask?.cancel()
-            if workingAgent == event.agent {
-                workingAgent = nil
-            }
+            workingTimeoutTasks[event.agent]?.cancel()
+            workingTimeoutTasks.removeValue(forKey: event.agent)
+            lastCompletedDurationSeconds = result.completedDurationSeconds
             syncDayIfNeeded()
             dailyCounts[event.agent.rawValue, default: 0] += 1
             let startOfDay = Calendar.current.startOfDay(for: Date())
@@ -237,12 +250,13 @@ final class AIService: ObservableObject {
         return (summary, nextCache)
     }
 
-    private func scheduleWorkingSafetyClear() {
-        workingTimeoutTask?.cancel()
-        workingTimeoutTask = Task { [weak self] in
+    private func scheduleWorkingSafetyClear(for agent: AIAgentKind) {
+        workingTimeoutTasks[agent]?.cancel()
+        workingTimeoutTasks[agent] = Task { [weak self] in
             try? await Task.sleep(for: .seconds(600))
             guard !Task.isCancelled, let self else { return }
-            self.workingAgent = nil
+            self.workingTimeoutTasks.removeValue(forKey: agent)
+            self.activeSessions.removeAll { $0.agent == agent }
             self.onStateChanged?()
         }
     }

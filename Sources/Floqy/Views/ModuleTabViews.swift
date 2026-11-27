@@ -1876,14 +1876,15 @@ struct AITabView: View {
 
                     Spacer(minLength: 4)
 
-                    Text(ai.workingAgent.map { "\($0.shortName) Working" } ?? "Idle")
+                    let activeNames = ai.activeSessions.map(\.agent.shortName).joined(separator: " + ")
+                    Text(activeNames.isEmpty ? "Idle" : "\(activeNames) Working")
                         .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(ai.workingAgent != nil ? NotchColors.accentPrimary : NotchColors.textSecondary)
+                        .foregroundStyle(!ai.activeSessions.isEmpty ? NotchColors.accentPrimary : NotchColors.textSecondary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(
                             Capsule().fill(
-                                ai.workingAgent != nil
+                                !ai.activeSessions.isEmpty
                                     ? NotchColors.accentPrimary.opacity(0.16)
                                     : NotchColors.controlSurface
                             )

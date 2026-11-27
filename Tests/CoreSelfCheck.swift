@@ -475,6 +475,8 @@ enum CoreSelfCheck {
         precondition(parsedDone == AIAgentEvent(agent: .antigravity, state: .done), "Failed to parse Antigravity done URL")
         let parsedWorking = AIActivityLogic.parseIncomingURL(URL(string: "floqy://ai?agent=geminiCLI&state=working")!)
         precondition(parsedWorking == AIAgentEvent(agent: .geminiCLI, state: .working), "Failed to parse Gemini CLI working URL")
+        let parsedPermission = AIActivityLogic.parseIncomingURL(URL(string: "floqy://ai?agent=claudeCode&state=permission")!)
+        precondition(parsedPermission == AIAgentEvent(agent: .claudeCode, state: .permission), "Failed to parse Claude Code permission URL")
         precondition(AIActivityLogic.parseIncomingURL(URL(string: "https://example.com/ai")!) == nil, "Non-floqy URL must be ignored")
 
         // Antigravity hooks.json non-destructive upsert/remove
@@ -494,9 +496,42 @@ enum CoreSelfCheck {
         // Claude Code settings.json non-destructive upsert/remove
         let existingClaude = #"{"model":"sonnet","hooks":{"Stop":[{"hooks":[{"type":"command","command":"say hi"}]}]}}"#
         let mergedClaude = AIActivityLogic.upsertHook(in: existingClaude, for: .claudeCode)
-        precondition(mergedClaude?.contains("say hi") == true && AIActivityLogic.isHookInstalled(in: mergedClaude, for: .claudeCode), "Claude Code hook upsert failed")
+        precondition(
+            mergedClaude?.contains("say hi") == true
+                && mergedClaude?.contains("PreToolUse") == true
+                && mergedClaude?.contains("PermissionRequest") == true
+                && AIActivityLogic.isHookInstalled(in: mergedClaude, for: .claudeCode),
+            "Claude Code hook upsert failed"
+        )
         let cleanedClaude = AIActivityLogic.removeHook(from: mergedClaude, for: .claudeCode)
-        precondition(cleanedClaude?.contains("say hi") == true && !AIActivityLogic.isHookInstalled(in: cleanedClaude, for: .claudeCode), "Claude Code hook remove failed")
+        precondition(
+            cleanedClaude?.contains("say hi") == true
+                && cleanedClaude?.contains("PreToolUse") == false
+                && cleanedClaude?.contains("PermissionRequest") == false
+                && !AIActivityLogic.isHookInstalled(in: cleanedClaude, for: .claudeCode),
+            "Claude Code hook remove failed"
+        )
+
+        precondition(AIActivityLogic.formatElapsedSeconds(8) == "8s", "Short elapsed seconds format mismatch")
+        precondition(AIActivityLogic.formatElapsedSeconds(74) == "1m 14s", "Minute elapsed seconds format mismatch")
+
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        var sessions: [ActiveAISession] = []
+        let r1 = AIActivityLogic.applyEvent(AIAgentEvent(agent: .antigravity, state: .working), to: sessions, now: t0)
+        sessions = r1.sessions
+        precondition(sessions.map(\.agent) == [.antigravity], "First active AI session mismatch")
+
+        let r2 = AIActivityLogic.applyEvent(AIAgentEvent(agent: .claudeCode, state: .working), to: sessions, now: t0.addingTimeInterval(5))
+        sessions = r2.sessions
+        precondition(sessions.map(\.agent) == [.antigravity, .claudeCode], "Concurrent AI sessions must both remain active")
+
+        let r3 = AIActivityLogic.applyEvent(AIAgentEvent(agent: .claudeCode, state: .done), to: sessions, now: t0.addingTimeInterval(12))
+        sessions = r3.sessions
+        precondition(r3.completedDurationSeconds == 7, "Claude duration mismatch")
+        precondition(sessions == [ActiveAISession(agent: .antigravity, state: .working, startedAt: t0)], "Antigravity must remain active after Claude finishes")
+
+        let r4 = AIActivityLogic.applyEvent(AIAgentEvent(agent: .antigravity, state: .done), to: sessions, now: t0.addingTimeInterval(20))
+        precondition(r4.completedDurationSeconds == 20 && r4.sessions.isEmpty, "Final done should report total Antigravity duration and clear sessions")
 
         // Invalid JSON guard
         precondition(AIActivityLogic.upsertHook(in: "{bad json", for: .antigravity) == nil, "Invalid JSON must fail safely")
@@ -879,6 +914,14 @@ enum CoreSelfCheck {
         precondition(
             !NotchGeometry.isPointInRightCompactZone(point: CGPoint(x: 910, y: 920), panelFrame: compactPanel, centerGapWidth: gapWidth),
             "Point outside panel frame must return false"
+        )
+        precondition(
+            NotchGeometry.isPointInLeftCompactZone(point: CGPoint(x: 560, y: 960), panelFrame: compactPanel, centerGapWidth: gapWidth),
+            "Point inside left compact wing must be detected"
+        )
+        precondition(
+            !NotchGeometry.isPointInLeftCompactZone(point: CGPoint(x: 910, y: 960), panelFrame: compactPanel, centerGapWidth: gapWidth),
+            "Right wing must not count as left control zone"
         )
     }
 }

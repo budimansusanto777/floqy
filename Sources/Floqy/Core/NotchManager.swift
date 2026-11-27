@@ -521,6 +521,17 @@ final class NotchManager: ObservableObject {
         dismissActiveAlert()
     }
 
+    func openCompactActivity(_ activity: CompactActivity) {
+        hoverTask?.cancel()
+        if activity == .ai,
+           let session = ai.primarySession,
+           session.state == .permission {
+            ai.openAgentApp(session.agent)
+        } else {
+            selectTab(activity.targetTab)
+        }
+    }
+
     func triggerAIFinishedAlert(agent: AIAgentKind) {
         if alertSoundsEnabled {
             NSSound(named: NSSound.Name("Glass"))?.play()
@@ -706,16 +717,49 @@ final class NotchManager: ObservableObject {
         isDragTargeted = false
     }
 
-    private func isPointerInCompactRightControlZone() -> Bool {
+    private func isPointerInCompactControlZone() -> Bool {
         guard case .compact(let activity) = mode, let panel else { return false }
-        let hasRightControls = (activeCompactActivities.count >= 3 && activeCompactActivities.contains(activity))
-            || (activeCompactActivities.count <= 1 && activity == .music)
-        guard hasRightControls else { return false }
-        return NotchGeometry.isPointInRightCompactZone(
-            point: NSEvent.mouseLocation,
-            panelFrame: panel.frame,
-            centerGapWidth: geometry.notchCenterGapWidth
-        )
+        let point = NSEvent.mouseLocation
+        guard panel.frame.contains(point) else { return false }
+
+        if activeCompactActivities.count >= 2,
+           activeCompactActivities.contains(activity),
+           let layout = CompactActivity.dualSlotLayout(
+               active: activeCompactActivities,
+               overflowOffset: compactOverflowOffset
+           ) {
+            let rightNeedsClick = !layout.hidden.isEmpty
+                || (layout.right == .ai && ai.workingState == .permission)
+            if rightNeedsClick && NotchGeometry.isPointInRightCompactZone(
+                point: point,
+                panelFrame: panel.frame,
+                centerGapWidth: geometry.notchCenterGapWidth
+            ) {
+                return true
+            }
+            let leftNeedsClick = layout.left == .music
+                || (layout.left == .ai && ai.workingState == .permission)
+            if leftNeedsClick && NotchGeometry.isPointInLeftCompactZone(
+                point: point,
+                panelFrame: panel.frame,
+                centerGapWidth: geometry.notchCenterGapWidth
+            ) {
+                return true
+            }
+            return false
+        }
+
+        if activity == .ai && ai.workingState == .permission {
+            return true
+        }
+        if activity == .music {
+            return NotchGeometry.isPointInRightCompactZone(
+                point: point,
+                panelFrame: panel.frame,
+                centerGapWidth: geometry.notchCenterGapWidth
+            )
+        }
+        return false
     }
 
     func setHoveringCompactControls(_ hovering: Bool) {
@@ -726,7 +770,7 @@ final class NotchManager: ObservableObject {
                   hoverToExpandEnabled,
                   let panel,
                   panel.frame.contains(NSEvent.mouseLocation),
-                  !isPointerInCompactRightControlZone() {
+                  !isPointerInCompactControlZone() {
             handleHoverChanged(true)
         }
     }
@@ -743,13 +787,14 @@ final class NotchManager: ObservableObject {
         hoverTask?.cancel()
 
         if hovering {
-            guard !mode.isExpanded && !mode.isAlert && !isHoveringCompactControls && !isPointerInCompactRightControlZone() else { return }
+            guard !mode.isExpanded && !mode.isAlert && !isHoveringCompactControls && !isPointerInCompactControlZone() else { return }
+            let delayMs = mode.isCompact ? 450 : 120
             hoverTask = Task { [weak self] in
-                try? await Task.sleep(for: .milliseconds(120))
+                try? await Task.sleep(for: .milliseconds(delayMs))
                 guard !Task.isCancelled,
                       let self,
                       !self.isHoveringCompactControls,
-                      !self.isPointerInCompactRightControlZone() else { return }
+                      !self.isPointerInCompactControlZone() else { return }
                 self.setMode(.expanded)
             }
         } else {

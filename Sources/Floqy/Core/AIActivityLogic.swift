@@ -42,12 +42,21 @@ enum AIAgentKind: String, CaseIterable, Identifiable, Codable, Hashable {
 
 enum AIAgentEventState: String, Equatable {
     case working
+    case permission
     case done
 }
 
 struct AIAgentEvent: Equatable {
     let agent: AIAgentKind
     let state: AIAgentEventState
+}
+
+struct ActiveAISession: Equatable, Identifiable {
+    let agent: AIAgentKind
+    let state: AIAgentEventState
+    let startedAt: Date
+
+    var id: AIAgentKind { agent }
 }
 
 struct AICompletionRecord: Identifiable, Codable, Equatable {
@@ -102,6 +111,47 @@ enum AIActivityLogic {
 
     static func hookCommand(for agent: AIAgentKind, state: AIAgentEventState) -> String {
         "pgrep -x Floqy >/dev/null 2>&1 && open -g \"floqy://ai?agent=\(agent.rawValue)&state=\(state.rawValue)\" >/dev/null 2>&1; printf '{}'"
+    }
+
+    static func formatElapsedSeconds(_ totalSeconds: Int) -> String {
+        let clamped = max(0, totalSeconds)
+        let mins = clamped / 60
+        let secs = clamped % 60
+        if mins > 0 {
+            return "\(mins)m \(secs)s"
+        }
+        return "\(secs)s"
+    }
+
+    static func applyEvent(
+        _ event: AIAgentEvent,
+        to sessions: [ActiveAISession],
+        now: Date = Date()
+    ) -> (sessions: [ActiveAISession], completedDurationSeconds: Int?) {
+        var next = sessions
+
+        switch event.state {
+        case .working, .permission:
+            if let idx = next.firstIndex(where: { $0.agent == event.agent }) {
+                let existing = next[idx]
+                next[idx] = ActiveAISession(
+                    agent: event.agent,
+                    state: event.state,
+                    startedAt: existing.startedAt
+                )
+            } else {
+                next.append(ActiveAISession(agent: event.agent, state: event.state, startedAt: now))
+            }
+            return (next, nil)
+
+        case .done:
+            guard let idx = next.firstIndex(where: { $0.agent == event.agent }) else {
+                return (next, nil)
+            }
+            let existing = next.remove(at: idx)
+            let duration = max(1, Int(now.timeIntervalSince(existing.startedAt).rounded()))
+            return (next, duration)
+        }
     }
 
     static func parseIncomingURL(_ url: URL) -> AIAgentEvent? {
@@ -218,6 +268,27 @@ enum AIActivityLogic {
                     ]]
                 ]
             )
+            hooks["PreToolUse"] = replacingFloqyGroup(
+                in: hooks["PreToolUse"] as? [[String: Any]] ?? [],
+                agent: .claudeCode,
+                newGroup: [
+                    "matcher": "*",
+                    "hooks": [[
+                        "type": "command",
+                        "command": hookCommand(for: .claudeCode, state: .working)
+                    ]]
+                ]
+            )
+            hooks["PermissionRequest"] = replacingFloqyGroup(
+                in: hooks["PermissionRequest"] as? [[String: Any]] ?? [],
+                agent: .claudeCode,
+                newGroup: [
+                    "hooks": [[
+                        "type": "command",
+                        "command": hookCommand(for: .claudeCode, state: .permission)
+                    ]]
+                ]
+            )
             hooks["Stop"] = replacingFloqyGroup(
                 in: hooks["Stop"] as? [[String: Any]] ?? [],
                 agent: .claudeCode,
@@ -266,7 +337,7 @@ enum AIActivityLogic {
 
         case .claudeCode:
             if var hooks = root["hooks"] as? [String: Any] {
-                for key in ["UserPromptSubmit", "Stop"] {
+                for key in ["UserPromptSubmit", "PreToolUse", "PermissionRequest", "Stop"] {
                     let filtered = stripFloqyGroups(in: hooks[key] as? [[String: Any]] ?? [], agent: .claudeCode)
                     if filtered.isEmpty {
                         hooks.removeValue(forKey: key)

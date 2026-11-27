@@ -115,24 +115,25 @@ final class CameraMirrorService: ObservableObject {
 struct CameraPreviewLayerView: NSViewRepresentable {
     let session: AVCaptureSession
     let isMirrored: Bool
+    let isRunning: Bool
 
     func makeNSView(context: Context) -> CameraPreviewNSView {
         let view = CameraPreviewNSView()
-        view.previewLayer.session = session
+        view.attachSession(session)
         view.applyMirror(isMirrored)
         return view
     }
 
     func updateNSView(_ nsView: CameraPreviewNSView, context: Context) {
-        if nsView.previewLayer.session !== session {
-            nsView.previewLayer.session = session
-        }
+        nsView.attachSession(session)
         nsView.applyMirror(isMirrored)
     }
 }
 
 final class CameraPreviewNSView: NSView {
     let previewLayer = AVCaptureVideoPreviewLayer()
+    private var desiredMirrored: Bool = true
+    nonisolated(unsafe) private var startObserver: NSObjectProtocol?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -146,12 +147,37 @@ final class CameraPreviewNSView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    deinit {
+        if let startObserver {
+            NotificationCenter.default.removeObserver(startObserver)
+        }
+    }
+
     override func layout() {
         super.layout()
         previewLayer.frame = bounds
+        applyMirror(desiredMirrored)
+    }
+
+    func attachSession(_ session: AVCaptureSession) {
+        if previewLayer.session !== session {
+            previewLayer.session = session
+        }
+        guard startObserver == nil else { return }
+        startObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureSession.didStartRunningNotification,
+            object: session,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.applyMirror(self.desiredMirrored)
+            }
+        }
     }
 
     func applyMirror(_ mirrored: Bool) {
+        desiredMirrored = mirrored
         guard let connection = previewLayer.connection, connection.isVideoMirroringSupported else {
             return
         }
