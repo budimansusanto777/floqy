@@ -126,6 +126,8 @@ final class NotchManager: ObservableObject {
     @Published private(set) var geometry: NotchGeometry
     @Published private(set) var updateStatus: UpdateCheckStatus = .idle
     @Published private(set) var shortcutBindings: [ShortcutAction: GlobalShortcut]
+    @Published private(set) var activeCompactActivities: [CompactActivity] = []
+    @Published private(set) var compactOverflowOffset: Int = 0
 
     let music = MusicService()
     let calendar = CalendarService()
@@ -467,15 +469,22 @@ final class NotchManager: ObservableObject {
     }
 
     func showCompact(_ activity: CompactActivity) {
+        activeCompactActivities = [activity]
+        compactOverflowOffset = 0
         setMode(.compact(activity))
+    }
+
+    func cycleCompactOverflow() {
+        let count = activeCompactActivities.count
+        guard count >= 3 else { return }
+        compactOverflowOffset = (compactOverflowOffset + 1) % (count - 1)
     }
 
     // MARK: - Live Activity Priority & Alerts
 
     func syncCollapsedMode() {
         let isMemoryAlert = ramAlertEnabled && system.snapshot.usedPercent >= SystemLogic.ramAlertThresholdPercent
-        let desired = NotchMode.resolvedCollapsedMode(
-            activeAlert: activeAlert,
+        let activeList = CompactActivity.activeActivities(
             hasMeetingHeadsUp: meetingHeadsUp != nil,
             pomodoroRunning: productivity.pomodoro.isRunning,
             pomodoroPaused: productivity.pomodoro.isPaused,
@@ -484,6 +493,18 @@ final class NotchManager: ObservableObject {
             isMemoryAlertActive: isMemoryAlert,
             isMusicPlaying: music.track?.isPlaying == true
         )
+        if activeCompactActivities != activeList {
+            activeCompactActivities = activeList
+            compactOverflowOffset = 0
+        }
+        let desired: NotchMode
+        if let activeAlert {
+            desired = .alert(activeAlert)
+        } else if let primary = activeList.first {
+            desired = .compact(primary)
+        } else {
+            desired = .idle
+        }
         lastNonExpandedMode = desired
         if !mode.isExpanded && mode != desired {
             setMode(desired)
@@ -685,10 +706,28 @@ final class NotchManager: ObservableObject {
         isDragTargeted = false
     }
 
+    private func isPointerInCompactRightControlZone() -> Bool {
+        guard case .compact(let activity) = mode, let panel else { return false }
+        let hasRightControls = (activeCompactActivities.count >= 3 && activeCompactActivities.contains(activity))
+            || (activeCompactActivities.count <= 1 && activity == .music)
+        guard hasRightControls else { return false }
+        return NotchGeometry.isPointInRightCompactZone(
+            point: NSEvent.mouseLocation,
+            panelFrame: panel.frame,
+            centerGapWidth: geometry.notchCenterGapWidth
+        )
+    }
+
     func setHoveringCompactControls(_ hovering: Bool) {
         isHoveringCompactControls = hovering
         if hovering {
             hoverTask?.cancel()
+        } else if case .compact = mode,
+                  hoverToExpandEnabled,
+                  let panel,
+                  panel.frame.contains(NSEvent.mouseLocation),
+                  !isPointerInCompactRightControlZone() {
+            handleHoverChanged(true)
         }
     }
 
@@ -704,10 +743,13 @@ final class NotchManager: ObservableObject {
         hoverTask?.cancel()
 
         if hovering {
-            guard !mode.isExpanded && !mode.isAlert && !isHoveringCompactControls else { return }
+            guard !mode.isExpanded && !mode.isAlert && !isHoveringCompactControls && !isPointerInCompactRightControlZone() else { return }
             hoverTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(120))
-                guard !Task.isCancelled, let self, !self.isHoveringCompactControls else { return }
+                guard !Task.isCancelled,
+                      let self,
+                      !self.isHoveringCompactControls,
+                      !self.isPointerInCompactRightControlZone() else { return }
                 self.setMode(.expanded)
             }
         } else {

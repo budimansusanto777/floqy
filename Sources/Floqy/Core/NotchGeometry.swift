@@ -108,8 +108,8 @@ struct NotchGeometry: Equatable {
                 : CGSize(width: 196, height: 32)
         case .compact:
             let rawWidth: CGFloat = hasHardwareNotch
-                ? max(380, hardwareNotchSize.width + 188)
-                : 360
+                ? max(424, hardwareNotchSize.width + 224)
+                : 380
             let compactWidth = ceil(rawWidth / 2) * 2
             return CGSize(
                 width: compactWidth,
@@ -286,5 +286,16 @@ struct NotchGeometry: Equatable {
             return screens[index]
         }
         return NSScreen.main ?? screens.first
+    }
+
+    /// Returns true when a screen-space pointer lies inside the right interactive wing of a compact panel.
+    static func isPointInRightCompactZone(
+        point: CGPoint,
+        panelFrame: CGRect,
+        centerGapWidth: CGFloat
+    ) -> Bool {
+        guard panelFrame.contains(point) else { return false }
+        let rightZoneMinX = panelFrame.midX + (centerGapWidth / 2) - 4
+        return point.x >= rightZoneMinX
     }
 }

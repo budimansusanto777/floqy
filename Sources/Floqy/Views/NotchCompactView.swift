@@ -12,7 +12,26 @@ struct NotchCompactView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHoveringMusicControls = false
 
+    private var dualSlotLayout: CompactDualSlotLayout? {
+        guard manager.activeCompactActivities.count >= 2,
+              manager.activeCompactActivities.contains(activity) else {
+            return nil
+        }
+        return CompactActivity.dualSlotLayout(
+            active: manager.activeCompactActivities,
+            overflowOffset: manager.compactOverflowOffset
+        )
+    }
+
     var body: some View {
+        if let layout = dualSlotLayout, let rightActivity = layout.right {
+            dualSlotBody(left: layout.left, right: rightActivity, hidden: layout.hidden)
+        } else {
+            singleSlotBody
+        }
+    }
+
+    private var singleSlotBody: some View {
         HStack(spacing: 0) {
             leftWing
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -27,22 +46,170 @@ struct NotchCompactView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
         .onTapGesture {
-            switch activity {
-            case .music:
-                manager.selectTab(.home)
-            case .pomodoro:
-                manager.selectTab(.notes)
-            case .ai:
-                manager.selectTab(.ai)
-            case .memory:
-                manager.selectTab(.system)
-            case .meeting:
-                manager.selectTab(.home)
-            }
+            manager.selectTab(activity.targetTab)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Compact \(activity.displayName) activity. Tap to expand.")
         .accessibilityAddTraits(.isButton)
+    }
+
+    private func dualSlotBody(
+        left: CompactActivity,
+        right: CompactActivity,
+        hidden: [CompactActivity]
+    ) -> some View {
+        HStack(spacing: 0) {
+            Button {
+                manager.selectTab(left.targetTab)
+            } label: {
+                dualSlotContent(for: left, isCompactRight: false)
+                    .padding(.horizontal, 4)
+                    .frame(height: 24, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+            .accessibilityLabel("Open \(left.displayName)")
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Spacer()
+                .frame(width: manager.geometry.notchCenterGapWidth)
+
+            HStack(spacing: 4) {
+                Button {
+                    manager.selectTab(right.targetTab)
+                } label: {
+                    dualSlotContent(for: right, isCompactRight: !hidden.isEmpty)
+                        .padding(.horizontal, 4)
+                        .frame(height: 24, alignment: .trailing)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                .accessibilityLabel("Open \(right.displayName)")
+
+                if !hidden.isEmpty {
+                    let hiddenNames = hidden.map(\.displayName).joined(separator: ", ")
+                    Button {
+                        manager.cycleCompactOverflow()
+                    } label: {
+                        Text("+\(hidden.count)")
+                            .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                            .foregroundStyle(NotchColors.textPrimary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color.white.opacity(0.14)))
+                            .frame(minWidth: 24, minHeight: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                    .help("Next active: \(hiddenNames) (click to cycle)")
+                    .accessibilityLabel("Cycle to next active activity: \(hiddenNames)")
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if !hovering || !hidden.isEmpty {
+                    manager.setHoveringCompactControls(hovering)
+                }
+            }
+            .onDisappear {
+                manager.setHoveringCompactControls(false)
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private func dualSlotContent(for item: CompactActivity, isCompactRight: Bool) -> some View {
+        switch item {
+        case .music:
+            HStack(spacing: 5) {
+                if let artwork = music.artworkImage {
+                    Image(nsImage: artwork)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 15, height: 15)
+                        .clipShape(RoundedRectangle(cornerRadius: 3.5))
+                } else {
+                    Image(systemName: "music.note")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(NotchColors.accentPrimary)
+                }
+                Text(music.track?.title ?? "Music")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(NotchColors.textPrimary)
+                    .lineLimit(1)
+                EqualizerBarsView(isPlaying: music.track?.isPlaying == true, barCount: 3)
+                    .frame(height: 10)
+            }
+        case .pomodoro:
+            let ringColor = productivity.pomodoro.isRunning ? NotchColors.focusAccent : NotchColors.textSecondary
+            HStack(spacing: 5) {
+                ZStack {
+                    Circle()
+                        .stroke(NotchColors.trackBackground, lineWidth: 2)
+                    Circle()
+                        .trim(from: 0, to: productivity.pomodoro.remainingProgress)
+                        .stroke(ringColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .animation(.linear(duration: 0.4), value: productivity.pomodoro.remainingProgress)
+                    if !productivity.pomodoro.isRunning {
+                        Image(systemName: "pause.fill")
+                            .font(.system(size: 5.5, weight: .bold))
+                            .foregroundStyle(NotchColors.textSecondary)
+                    }
+                }
+                .frame(width: 14, height: 14)
+
+                Text(productivity.pomodoro.formattedTime)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundStyle(ringColor)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        case .ai:
+            HStack(spacing: 4) {
+                Image(systemName: "triangle")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NotchColors.accentPrimary)
+                Text(ai.workingAgent?.shortName ?? "AI")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(NotchColors.textPrimary)
+                    .lineLimit(1)
+                if !isCompactRight && ai.workingAgent != nil {
+                    EqualizerBarsView(isPlaying: true, barCount: 3)
+                        .frame(height: 10)
+                }
+            }
+        case .meeting:
+            let provider = manager.meetingHeadsUp?.event.meetingProvider ?? "Meeting"
+            let isMeet = provider == "Google Meet"
+            let minutes = manager.meetingHeadsUp?.minutesRemaining ?? 5
+            HStack(spacing: 4) {
+                Image(systemName: "video.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(isMeet ? NotchColors.statusHealthy : NotchColors.accentPrimary)
+                Text("in \(minutes)m")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(NotchColors.statusWarning)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1.5)
+                    .background(Capsule().fill(NotchColors.statusWarning.opacity(0.16)))
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        case .memory:
+            let memColor = system.snapshot.pressureLevel == .critical ? NotchColors.statusAlert : NotchColors.statusWarning
+            HStack(spacing: 4) {
+                Image(systemName: "memorychip")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(memColor)
+                Text("\(system.snapshot.usedPercent)%")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(memColor)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        }
     }
 
     @ViewBuilder

@@ -45,26 +45,29 @@ enum NotchMode: Equatable, Hashable {
         if let activeAlert {
             return .alert(activeAlert)
         }
-        if hasMeetingHeadsUp {
-            return .compact(.meeting)
-        }
-        if pomodoroRunning {
-            return .compact(.pomodoro)
-        }
-        if hasActiveAIWork {
-            return .compact(.ai)
-        }
-        if isMemoryAlertActive {
-            return .compact(.memory)
-        }
-        if isMusicPlaying {
-            return .compact(.music)
-        }
-        if pomodoroPaused && showPausedPomodoroInNotch {
-            return .compact(.pomodoro)
+        let active = CompactActivity.activeActivities(
+            hasMeetingHeadsUp: hasMeetingHeadsUp,
+            pomodoroRunning: pomodoroRunning,
+            pomodoroPaused: pomodoroPaused,
+            showPausedPomodoroInNotch: showPausedPomodoroInNotch,
+            hasActiveAIWork: hasActiveAIWork,
+            isMemoryAlertActive: isMemoryAlertActive,
+            isMusicPlaying: isMusicPlaying
+        )
+        if let primary = active.first {
+            return .compact(primary)
         }
         return .idle
     }
+}
+
+/// Resolved dual-slot layout when 1, 2, or 3+ live activities are running simultaneously.
+struct CompactDualSlotLayout: Equatable {
+    let left: CompactActivity
+    let right: CompactActivity?
+    let hidden: [CompactActivity]
+
+    var isDual: Bool { right != nil }
 }
 
 /// Live activities that can be surfaced in the Compact notch wings.
@@ -85,6 +88,52 @@ enum CompactActivity: String, CaseIterable, Identifiable, Hashable {
         case .ai: return "AI Agent"
         case .memory: return "Memory"
         }
+    }
+
+    var targetTab: NotchTab {
+        switch self {
+        case .music, .meeting: return .home
+        case .pomodoro: return .notes
+        case .ai: return .ai
+        case .memory: return .system
+        }
+    }
+
+    static func activeActivities(
+        hasMeetingHeadsUp: Bool,
+        pomodoroRunning: Bool,
+        pomodoroPaused: Bool,
+        showPausedPomodoroInNotch: Bool,
+        hasActiveAIWork: Bool = false,
+        isMemoryAlertActive: Bool = false,
+        isMusicPlaying: Bool
+    ) -> [CompactActivity] {
+        var result: [CompactActivity] = []
+        if hasMeetingHeadsUp { result.append(.meeting) }
+        if pomodoroRunning { result.append(.pomodoro) }
+        if hasActiveAIWork { result.append(.ai) }
+        if isMemoryAlertActive { result.append(.memory) }
+        if isMusicPlaying { result.append(.music) }
+        if !pomodoroRunning && pomodoroPaused && showPausedPomodoroInNotch {
+            result.append(.pomodoro)
+        }
+        return result
+    }
+
+    static func dualSlotLayout(active: [CompactActivity], overflowOffset: Int = 0) -> CompactDualSlotLayout? {
+        guard !active.isEmpty else { return nil }
+        guard active.count >= 2 else {
+            return CompactDualSlotLayout(left: active[0], right: nil, hidden: [])
+        }
+        let left: CompactActivity = active.contains(.music) ? .music : active[0]
+        let rightPool = active.filter { $0 != left }
+        guard !rightPool.isEmpty else {
+            return CompactDualSlotLayout(left: left, right: nil, hidden: [])
+        }
+        let index = ((overflowOffset % rightPool.count) + rightPool.count) % rightPool.count
+        let right = rightPool[index]
+        let hidden = rightPool.enumerated().compactMap { $0.offset == index ? nil : $0.element }
+        return CompactDualSlotLayout(left: left, right: right, hidden: hidden)
     }
 }
 

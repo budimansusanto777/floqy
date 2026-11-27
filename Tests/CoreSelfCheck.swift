@@ -19,7 +19,8 @@ enum CoreSelfCheck {
         checkHardwareStatusAndRestingEyesLogic()
         checkUpdateLogic()
         checkShortcutAndMirrorLogic()
-        print("CoreSelfCheck: 15/15 checks passed.")
+        checkDualSlotCompactLogic()
+        print("CoreSelfCheck: 16/16 checks passed.")
     }
 
     private static func checkNotchedScreenDetection() {
@@ -806,6 +807,76 @@ enum CoreSelfCheck {
         let expandedSize = geometry.shellSize(for: .expanded)
         precondition(mirrorSize.width == expandedSize.width && mirrorSize.height >= 260, "Camera mirror alert shell dimensions mismatch")
         precondition(ShortcutAction.cameraMirror.hotKeyID == 5 && ShortcutAction(hotKeyID: 5) == .cameraMirror, "Camera mirror shortcut action ID mismatch")
+    }
+
+    private static func checkDualSlotCompactLogic() {
+        let activeThree = CompactActivity.activeActivities(
+            hasMeetingHeadsUp: false,
+            pomodoroRunning: true,
+            pomodoroPaused: false,
+            showPausedPomodoroInNotch: true,
+            hasActiveAIWork: true,
+            isMemoryAlertActive: false,
+            isMusicPlaying: true
+        )
+        precondition(activeThree == [.pomodoro, .ai, .music], "Active priority order mismatch")
+
+        let noDuplicatePaused = CompactActivity.activeActivities(
+            hasMeetingHeadsUp: false,
+            pomodoroRunning: true,
+            pomodoroPaused: true,
+            showPausedPomodoroInNotch: true,
+            hasActiveAIWork: false,
+            isMemoryAlertActive: false,
+            isMusicPlaying: false
+        )
+        precondition(noDuplicatePaused == [.pomodoro], "Running pomodoro must not duplicate paused entry")
+
+        let single = CompactActivity.dualSlotLayout(active: [.music])
+        precondition(single == CompactDualSlotLayout(left: .music, right: nil, hidden: []) && single?.isDual == false, "Single active item must not enter dual mode")
+
+        let twoWithMusic = CompactActivity.dualSlotLayout(active: [.pomodoro, .music])
+        precondition(twoWithMusic == CompactDualSlotLayout(left: .music, right: .pomodoro, hidden: []) && twoWithMusic?.isDual == true, "Dual mode with music should anchor music left")
+
+        let twoNoMusic = CompactActivity.dualSlotLayout(active: [.pomodoro, .ai])
+        precondition(twoNoMusic == CompactDualSlotLayout(left: .pomodoro, right: .ai, hidden: []), "Dual mode without music should place top two")
+
+        let threeOffset0 = CompactActivity.dualSlotLayout(active: activeThree, overflowOffset: 0)
+        precondition(threeOffset0 == CompactDualSlotLayout(left: .music, right: .pomodoro, hidden: [.ai]), "3-active offset 0 mismatch")
+
+        let threeOffset1 = CompactActivity.dualSlotLayout(active: activeThree, overflowOffset: 1)
+        precondition(threeOffset1 == CompactDualSlotLayout(left: .music, right: .ai, hidden: [.pomodoro]), "3-active offset 1 cycle mismatch")
+
+        let threeOffset2 = CompactActivity.dualSlotLayout(active: activeThree, overflowOffset: 2)
+        precondition(threeOffset2 == threeOffset0, "3-active offset 2 should wrap back")
+
+        let threeNegOffset = CompactActivity.dualSlotLayout(active: activeThree, overflowOffset: -1)
+        precondition(threeNegOffset == threeOffset1, "Negative offset should wrap cleanly")
+
+        precondition(CompactActivity.music.targetTab == .home, "Music targetTab mismatch")
+        precondition(CompactActivity.meeting.targetTab == .home, "Meeting targetTab mismatch")
+        precondition(CompactActivity.pomodoro.targetTab == .notes, "Pomodoro targetTab mismatch")
+        precondition(CompactActivity.ai.targetTab == .ai, "AI targetTab mismatch")
+        precondition(CompactActivity.memory.targetTab == .system, "Memory targetTab mismatch")
+
+        let compactPanel = CGRect(x: 500, y: 944, width: 448, height: 40)
+        let gapWidth: CGFloat = 212
+        precondition(
+            NotchGeometry.isPointInRightCompactZone(point: CGPoint(x: 910, y: 960), panelFrame: compactPanel, centerGapWidth: gapWidth),
+            "Point inside right compact wing must be detected"
+        )
+        precondition(
+            !NotchGeometry.isPointInRightCompactZone(point: CGPoint(x: 724, y: 960), panelFrame: compactPanel, centerGapWidth: gapWidth),
+            "Center notch camera area must not count as right control zone"
+        )
+        precondition(
+            !NotchGeometry.isPointInRightCompactZone(point: CGPoint(x: 560, y: 960), panelFrame: compactPanel, centerGapWidth: gapWidth),
+            "Left wing must not count as right control zone"
+        )
+        precondition(
+            !NotchGeometry.isPointInRightCompactZone(point: CGPoint(x: 910, y: 920), panelFrame: compactPanel, centerGapWidth: gapWidth),
+            "Point outside panel frame must return false"
+        )
     }
 }
 
