@@ -9,7 +9,7 @@
 [Preview](#preview) · [Install](#install) · [Features](#features) · [Shortcuts](#shortcuts--permissions) · [FAQ](#faq)
 
 <p align="center">
-  <a href="https://github.com/budimansusanto777/floqy/releases/latest"><img src="https://img.shields.io/badge/Release-v1.2.0-38bdf8?style=flat-square" height="20" alt="Release v1.2.0" /></a>
+  <a href="https://github.com/budimansusanto777/floqy/releases/latest"><img src="https://img.shields.io/badge/Release-v1.3.0-38bdf8?style=flat-square" height="20" alt="Release v1.3.0" /></a>
   <a href="#requirements"><img src="https://img.shields.io/badge/macOS-14.0%2B-111827?style=flat-square&logo=apple&logoColor=white" height="20" alt="macOS 14.0+" /></a>
   <a href="#build-from-source"><img src="https://img.shields.io/badge/Swift-5%20%2F%206-F05138?style=flat-square&logo=swift&logoColor=white" height="20" alt="Swift 5 / 6" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-2563eb?style=flat-square" height="20" alt="License: GPLv3" /></a>
@@ -33,7 +33,7 @@ https://github.com/user-attachments/assets/98cdbd38-3984-4a02-bd0a-90da5fab0cf4
 
 ### Download DMG (Recommended)
 
-1. Download **`Floqy-1.2.0.dmg`** from [Latest Releases](https://github.com/budimansusanto777/floqy/releases/latest).
+1. Download **`Floqy-1.3.0.dmg`** from [Latest Releases](https://github.com/budimansusanto777/floqy/releases/latest).
 2. Open the `.dmg` and drag **Floqy** to **Applications**.
 3. On first launch, if macOS shows an unidentified-developer prompt (the release binary is ad-hoc signed), open **System Settings → Privacy & Security** and click **Open Anyway**.
 
