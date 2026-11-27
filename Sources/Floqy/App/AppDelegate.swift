@@ -7,12 +7,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusBarController: StatusBarController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let bundleID = Bundle.main.bundleIdentifier {
+            let currentPID = ProcessInfo.processInfo.processIdentifier
+            for running in NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+                where running.processIdentifier != currentPID {
+                if !running.terminate() {
+                    running.forceTerminate()
+                }
+            }
+        }
         NSApp.setActivationPolicy(.accessory)
         statusBarController = StatusBarController(notchManager: notchManager)
         notchManager.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        statusBarController?.invalidate()
+        statusBarController = nil
         notchManager.stop()
     }
 

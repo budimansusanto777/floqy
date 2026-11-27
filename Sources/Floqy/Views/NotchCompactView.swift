@@ -433,6 +433,8 @@ struct NotchAlertView: View {
                     chargingTelemetryCard(batteryPercent: batteryPercent, etaText: etaText)
                 } else if case .cameraMirror = alert {
                     cameraMirrorCard()
+                } else if case .updating(let version) = alert {
+                    updateProgressCard(version: version)
                 } else {
                     HStack(spacing: 10) {
                         alertBadge
@@ -454,7 +456,7 @@ struct NotchAlertView: View {
                     manager.dismissActiveAlert()
                 case .pomodoroComplete, .meetingStarting:
                     manager.setMode(.expanded)
-                case .cameraMirror:
+                case .cameraMirror, .updating:
                     break
                 }
             }
@@ -623,6 +625,54 @@ struct NotchAlertView: View {
         }
     }
 
+    private func updateProgressCard(version: String) -> some View {
+        let info: (Double, String) = {
+            if case .installing(let progress, let stage) = manager.updateStatus {
+                return (progress, stage)
+            }
+            return (0.05, "Preparing update…")
+        }()
+        let clamped = min(1.0, max(0.03, info.0))
+        let pct = Int((min(1.0, max(0.0, info.0)) * 100).rounded())
+
+        return VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(NotchColors.accentPrimary)
+                Text("Updating to v\(version)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(NotchColors.textPrimary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text("\(pct)%")
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundStyle(NotchColors.accentPrimary)
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(NotchColors.trackBackground)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(NotchColors.accentPrimary)
+                        .frame(width: max(6, geo.size.width * clamped))
+                        .animation(.easeOut(duration: 0.2), value: clamped)
+                }
+            }
+            .frame(height: 6)
+
+            HStack {
+                Text(info.1)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(NotchColors.textSecondary)
+                    .lineLimit(1)
+                Spacer()
+            }
+        }
+    }
+
     private func accentColor(for agent: AIAgentKind) -> Color {
         switch agent {
         case .antigravity: return NotchColors.accentPrimary
@@ -722,7 +772,7 @@ struct NotchAlertView: View {
                                 .stroke(NotchColors.cardBorder, lineWidth: 1)
                         )
                 )
-        case .chargingConnected, .cameraMirror:
+        case .chargingConnected, .cameraMirror, .updating:
             EmptyView()
         }
     }
@@ -774,7 +824,7 @@ struct NotchAlertView: View {
                     .foregroundStyle(NotchColors.textSecondary)
                     .lineLimit(1)
             }
-        case .chargingConnected, .cameraMirror:
+        case .chargingConnected, .cameraMirror, .updating:
             EmptyView()
         }
     }
@@ -857,7 +907,7 @@ struct NotchAlertView: View {
                     .padding(.vertical, 4)
                     .background(Capsule().fill(NotchColors.statusHealthy.opacity(0.14)))
             }
-        case .chargingConnected, .cameraMirror:
+        case .chargingConnected, .cameraMirror, .updating:
             EmptyView()
         }
     }

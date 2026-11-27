@@ -5,6 +5,7 @@ enum NotchAlert: Equatable, Hashable {
     case pomodoroComplete(durationMinutes: Int)
     case meetingStarting(eventId: String, title: String, provider: String, url: URL)
     case cameraMirror
+    case updating(version: String)
     case aiFinished(agent: AIAgentKind)
     case headphonesConnected(name: String, batteryPercent: Int?, isAirPods: Bool)
     case chargingConnected(batteryPercent: Int, etaText: String?)

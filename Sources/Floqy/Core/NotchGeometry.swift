@@ -125,6 +125,8 @@ struct NotchGeometry: Equatable {
                 return CGSize(width: 424, height: max(86, notchSafeTopHeight + 52))
             case .cameraMirror:
                 return CGSize(width: expandedShellWidth, height: max(300, notchSafeTopHeight + 266))
+            case .updating:
+                return CGSize(width: 396, height: max(92, notchSafeTopHeight + 58))
             }
         case .expanded:
             if activeTab == .home && homeSubView == .calendar {

@@ -18,6 +18,10 @@ final class StatusBarController: NSObject {
         }
     }
 
+    func invalidate() {
+        NSStatusBar.system.removeStatusItem(statusItem)
+    }
+
     private func configureStatusItem() {
         if let button = statusItem.button {
             button.image = Self.makeMenuBarPoodleIcon()

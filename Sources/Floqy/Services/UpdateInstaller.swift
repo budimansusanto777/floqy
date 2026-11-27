@@ -129,11 +129,21 @@ enum UpdateInstaller {
         target="$3"
         workdir="$4"
         i=0
-        while [ "$i" -lt 100 ]; do
+        while [ "$i" -lt 30 ]; do
           kill -0 "$pid" 2>/dev/null || break
           sleep 0.1
           i=$((i + 1))
         done
+        if kill -0 "$pid" 2>/dev/null; then
+          kill -TERM "$pid" 2>/dev/null || true
+          j=0
+          while [ "$j" -lt 10 ]; do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.1
+            j=$((j + 1))
+          done
+          kill -KILL "$pid" 2>/dev/null || true
+        fi
         backup="${target}.floqy-backup.$$"
         rm -rf "$backup"
         if ! mv "$target" "$backup"; then

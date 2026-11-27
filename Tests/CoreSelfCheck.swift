@@ -765,6 +765,9 @@ enum CoreSelfCheck {
         try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: execURL.path)
         precondition(UpdateLogic.validateStagedAppBundle(at: stagedApp), "Valid staged bundle must pass validation")
         precondition(!UpdateLogic.validateStagedAppBundle(at: stagedApp, expectedBundleID: "com.other.app"), "Mismatched bundle ID must fail validation")
+
+        let updateAlertSize = NotchGeometry(screen: nil).shellSize(for: .alert(.updating(version: "1.3.0")))
+        precondition(updateAlertSize.width == 396 && updateAlertSize.height >= 80, "Update alert shell dimensions mismatch")
     }
 
     private static func checkShortcutAndMirrorLogic() {

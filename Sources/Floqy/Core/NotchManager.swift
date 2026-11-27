@@ -1260,7 +1260,11 @@ final class NotchManager: ObservableObject {
         }
 
         updateCheckTask?.cancel()
+        alertAutoDismissTask?.cancel()
+        hoverTask?.cancel()
         updateStatus = .installing(progress: 0, stage: "Downloading v\(release.version)…")
+        activeAlert = .updating(version: release.version)
+        setMode(.alert(.updating(version: release.version)))
 
         updateCheckTask = Task { [weak self] in
             let manager = self
@@ -1287,11 +1291,17 @@ final class NotchManager: ObservableObject {
                     targetAppURL: Bundle.main.bundleURL
                 )
                 NSApp.terminate(nil)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    exit(0)
+                }
             } catch is CancellationError {
                 return
             } catch {
                 guard let self else { return }
                 self.updateCheckTask = nil
+                if case .updating = self.activeAlert {
+                    self.dismissActiveAlert()
+                }
                 let message = error.localizedDescription
                 self.updateStatus = .failed(message)
                 if presentErrorAlert {
