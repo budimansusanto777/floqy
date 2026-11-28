@@ -172,6 +172,7 @@ struct NotchRootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.notchThemePreset, activeTheme)
+        .environment(\.isDisplayAsleep, manager.isDisplayAsleep)
         .preferredColorScheme(activeTheme.isLight ? .light : .dark)
         .onAppear {
             if manager.mode.isExpanded {

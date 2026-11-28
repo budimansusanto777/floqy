@@ -6,10 +6,19 @@ private struct NotchThemePresetKey: EnvironmentKey {
     static let defaultValue: NotchThemePreset = .obsidian
 }
 
+private struct DisplayAsleepKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
 extension EnvironmentValues {
     var notchThemePreset: NotchThemePreset {
         get { self[NotchThemePresetKey.self] }
         set { self[NotchThemePresetKey.self] = newValue }
+    }
+
+    var isDisplayAsleep: Bool {
+        get { self[DisplayAsleepKey.self] }
+        set { self[DisplayAsleepKey.self] = newValue }
     }
 }
 

@@ -189,6 +189,9 @@ struct ClipboardEntry: Identifiable, Equatable {
 }
 
 enum ClipboardLogic {
+    static let maxTextUTF8Bytes = 256 * 1024
+    static let unpinnedRetentionSeconds: TimeInterval = 24 * 3600
+
     private static let ignoredPasteboardTypes: Set<String> = [
         "org.nspasteboard.ConcealedType",
         "org.nspasteboard.TransientType",
@@ -198,6 +201,23 @@ enum ClipboardLogic {
 
     static func shouldIgnorePasteboardTypes(_ types: [String]) -> Bool {
         types.contains { ignoredPasteboardTypes.contains($0) }
+    }
+
+    static func isTextWithinRetentionLimit(_ text: String) -> Bool {
+        text.utf8.count <= maxTextUTF8Bytes
+    }
+
+    static func expiredUnpinnedIDs(
+        in entries: [ClipboardEntry],
+        now: Date = Date(),
+        maxAge: TimeInterval = unpinnedRetentionSeconds
+    ) -> Set<UUID> {
+        Set(
+            entries.compactMap { entry in
+                guard !entry.isPinned, now.timeIntervalSince(entry.createdAt) >= maxAge else { return nil }
+                return entry.id
+            }
+        )
     }
     static func classifyText(_ raw: String) -> ClipboardEntryKind {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)

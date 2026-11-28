@@ -1772,10 +1772,6 @@ struct ClipboardTabView: View {
                         .buttonStyle(.plain)
                     }
 
-                    Text("⌘⇧V")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(NotchColors.textSecondary)
-
                     if clipboard.hasUnpinnedEntries {
                         Button("Clear") {
                             clipboard.clearUnpinned()

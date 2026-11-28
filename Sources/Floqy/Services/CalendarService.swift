@@ -33,6 +33,7 @@ final class CalendarService: ObservableObject {
     private var refreshTickCount = 0
     private var lastRefreshDayKey = CalendarLogic.dayKey(for: Date())
     private var lastRefreshDate: Date = .distantPast
+    private var isDisplayAsleep = false
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -50,7 +51,29 @@ final class CalendarService: ObservableObject {
     func start() {
         stop()
         authorizationStatus = EKEventStore.authorizationStatus(for: .event)
+        if !isDisplayAsleep {
+            startRefreshTimer()
+            refreshEvents()
+        }
+    }
 
+    func setDisplayAsleep(_ asleep: Bool) {
+        guard isDisplayAsleep != asleep else { return }
+        isDisplayAsleep = asleep
+        if asleep {
+            delayedRefreshTask?.cancel()
+            delayedRefreshTask = nil
+            refreshTimer?.invalidate()
+            refreshTimer = nil
+            clearStore()
+        } else {
+            startRefreshTimer()
+            refreshEvents()
+        }
+    }
+
+    private func startRefreshTimer() {
+        refreshTimer?.invalidate()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -66,8 +89,6 @@ final class CalendarService: ObservableObject {
                 }
             }
         }
-
-        refreshEvents()
     }
 
     func stop() {

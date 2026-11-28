@@ -8,6 +8,7 @@ struct NotchIdleView: View {
     @ObservedObject var productivity: ProductivityService
     @ObservedObject var hardware: HardwareStatusService
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isDisplayAsleep) private var isDisplayAsleep
 
     @StateObject private var pointerTracker = IdlePointerTracker()
     @StateObject private var petDriver = PetWalkDriver()
@@ -21,7 +22,7 @@ struct NotchIdleView: View {
     @State private var pointerSettleTask: Task<Void, Never>?
 
     private var tracksPointerMotion: Bool {
-        guard !reduceMotion else { return false }
+        guard !reduceMotion, !isDisplayAsleep else { return false }
         switch manager.idleAppearance {
         case .eyes, .wave, .cat, .dog:
             return true
@@ -70,7 +71,7 @@ struct NotchIdleView: View {
                 }
             }
         }
-        .task(id: "\(manager.idleAppearance.rawValue)-\(reduceMotion)") {
+        .task(id: "\(manager.idleAppearance.rawValue)-\(reduceMotion)-\(isDisplayAsleep)") {
             await runIdleAnimationLoop()
         }
         .task(id: manager.idleHappyUntil) {
@@ -91,6 +92,12 @@ struct NotchIdleView: View {
         }
         .onChange(of: reduceMotion) { _, _ in
             syncPetBounds()
+            configurePointerTracking()
+        }
+        .onChange(of: isDisplayAsleep) { _, asleep in
+            if asleep {
+                petDriver.stop(snapToRest: true)
+            }
             configurePointerTracking()
         }
         .onDisappear {
@@ -187,7 +194,7 @@ struct NotchIdleView: View {
                 .opacity(isPointerActive && !reduceMotion ? 0 : 0.72)
 
             if !reduceMotion {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPointerActive)) { context in
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPointerActive || isDisplayAsleep)) { context in
                     DualAcousticWaveCanvas(phase: context.date.timeIntervalSinceReferenceDate * 6.2)
                         .frame(width: 46, height: 12)
                 }
@@ -403,7 +410,7 @@ struct NotchIdleView: View {
         resetPetStates()
         horizonExpanded = false
 
-        guard !reduceMotion else { return }
+        guard !reduceMotion, !isDisplayAsleep else { return }
 
         switch manager.idleAppearance {
         case .off, .wave:
@@ -688,10 +695,11 @@ struct FloqyCalicoMascotView: View {
     var isCelebrating: Bool = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isDisplayAsleep) private var isDisplayAsleep
 
     var body: some View {
         let height = round(width * 0.72)
-        let animateLoop = mode == .working && !reduceMotion
+        let animateLoop = mode == .working && !reduceMotion && !isDisplayAsleep
         let hopY: CGFloat = (mode == .done && !reduceMotion && !isCelebrating) ? 4 : 0
         let hopScale: CGFloat = (mode == .done && !reduceMotion && !isCelebrating) ? 0.9 : 1.0
 
@@ -1047,10 +1055,11 @@ struct FloqyPoodleMascotView: View {
     var isCelebrating: Bool = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isDisplayAsleep) private var isDisplayAsleep
 
     var body: some View {
         let height = round(width * 0.72)
-        let animateLoop = mode == .working && !reduceMotion
+        let animateLoop = mode == .working && !reduceMotion && !isDisplayAsleep
         let hopY: CGFloat = (mode == .done && !reduceMotion && !isCelebrating) ? 4 : 0
         let hopScale: CGFloat = (mode == .done && !reduceMotion && !isCelebrating) ? 0.9 : 1.0
 

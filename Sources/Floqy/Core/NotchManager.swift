@@ -132,6 +132,7 @@ final class NotchManager: ObservableObject {
     @Published private(set) var shortcutBindings: [ShortcutAction: GlobalShortcut]
     @Published private(set) var activeCompactActivities: [CompactActivity] = []
     @Published private(set) var compactOverflowOffset: Int = 0
+    @Published private(set) var isDisplayAsleep: Bool = false
 
     let music = MusicService()
     let calendar = CalendarService()
@@ -167,6 +168,10 @@ final class NotchManager: ObservableObject {
     private var screenObserver: NSObjectProtocol?
     private var menuBeginObserver: NSObjectProtocol?
     private var menuEndObserver: NSObjectProtocol?
+    private var workspaceSleepObservers: [NSObjectProtocol] = []
+    private var distributedLockObservers: [NSObjectProtocol] = []
+    private var isScreenSleeping: Bool = false
+    private var isScreenLocked: Bool = false
     private var lastNonExpandedMode: NotchMode = .idle
 
     init() {
@@ -231,6 +236,14 @@ final class NotchManager: ObservableObject {
         if let menuEndObserver {
             NotificationCenter.default.removeObserver(menuEndObserver)
         }
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        for observer in workspaceSleepObservers {
+            workspaceCenter.removeObserver(observer)
+        }
+        let distributedCenter = DistributedNotificationCenter.default()
+        for observer in distributedLockObservers {
+            distributedCenter.removeObserver(observer)
+        }
         for ref in hotKeyRefs.values {
             UnregisterEventHotKey(ref)
         }
@@ -243,6 +256,7 @@ final class NotchManager: ObservableObject {
         setupPanel()
         observeScreenChanges()
         observeMenuTracking()
+        observeDisplaySleepAndLock()
         syncCursorScreenMonitor()
         registerGlobalHotKeys()
         startServices()
@@ -1042,6 +1056,74 @@ final class NotchManager: ObservableObject {
                 self?.isTrackingMenu = false
             }
         }
+    }
+
+    private func observeDisplaySleepAndLock() {
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        let sleepNames: [Notification.Name] = [
+            NSWorkspace.screensDidSleepNotification,
+            NSWorkspace.willSleepNotification
+        ]
+        for name in sleepNames {
+            workspaceSleepObservers.append(
+                workspaceCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    Task { @MainActor [weak self] in
+                        self?.isScreenSleeping = true
+                        self?.syncDisplayAsleep()
+                    }
+                }
+            )
+        }
+
+        let wakeNames: [Notification.Name] = [
+            NSWorkspace.screensDidWakeNotification,
+            NSWorkspace.didWakeNotification
+        ]
+        for name in wakeNames {
+            workspaceSleepObservers.append(
+                workspaceCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    Task { @MainActor [weak self] in
+                        self?.isScreenSleeping = false
+                        self?.syncDisplayAsleep()
+                    }
+                }
+            )
+        }
+
+        let distributedCenter = DistributedNotificationCenter.default()
+        distributedLockObservers.append(
+            distributedCenter.addObserver(
+                forName: Notification.Name("com.apple.screenIsLocked"),
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.isScreenLocked = true
+                    self?.syncDisplayAsleep()
+                }
+            }
+        )
+        distributedLockObservers.append(
+            distributedCenter.addObserver(
+                forName: Notification.Name("com.apple.screenIsUnlocked"),
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.isScreenLocked = false
+                    self?.syncDisplayAsleep()
+                }
+            }
+        )
+    }
+
+    private func syncDisplayAsleep() {
+        let asleep = isScreenSleeping || isScreenLocked
+        guard asleep != isDisplayAsleep else { return }
+        isDisplayAsleep = asleep
+        clipboard.setDisplayAsleep(asleep)
+        system.setDisplayAsleep(asleep)
+        calendar.setDisplayAsleep(asleep)
     }
 
     private func refreshGeometry() {

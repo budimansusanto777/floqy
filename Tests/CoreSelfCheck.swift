@@ -336,6 +336,16 @@ enum CoreSelfCheck {
 
         let filtered = ClipboardLogic.filterAndSort([older, pinned, newer], query: "alpha")
         precondition(filtered.map(\.id) == [newer.id, older.id], "Search filter mismatch")
+
+        precondition(ClipboardLogic.isTextWithinRetentionLimit("short snippet"), "Normal snippet must stay within limit")
+        let oversized = String(repeating: "a", count: ClipboardLogic.maxTextUTF8Bytes + 1)
+        precondition(!ClipboardLogic.isTextWithinRetentionLimit(oversized), "Oversized text >256KB must be rejected")
+
+        let staleUnpinned = ClipboardEntry(kind: .text, textContent: "old", isPinned: false, createdAt: refDate.addingTimeInterval(-ClipboardLogic.unpinnedRetentionSeconds - 10))
+        let stalePinned = ClipboardEntry(kind: .text, textContent: "old pin", isPinned: true, createdAt: refDate.addingTimeInterval(-ClipboardLogic.unpinnedRetentionSeconds - 10))
+        let freshUnpinned = ClipboardEntry(kind: .text, textContent: "fresh", isPinned: false, createdAt: refDate.addingTimeInterval(-60))
+        let expiredIDs = ClipboardLogic.expiredUnpinnedIDs(in: [staleUnpinned, stalePinned, freshUnpinned], now: refDate)
+        precondition(expiredIDs == [staleUnpinned.id], "Only stale unpinned entries (>24h) must expire")
     }
 
     private static func checkNotchEnhancementsLogic() {

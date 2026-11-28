@@ -13,6 +13,7 @@ struct FloqyAIPetSpriteView: View {
     var size: CGFloat = 22
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isDisplayAsleep) private var isDisplayAsleep
 
     static func accentColor(for agent: AIAgentKind) -> Color {
         switch agent {
@@ -37,7 +38,7 @@ struct FloqyAIPetSpriteView: View {
     }
 
     var body: some View {
-        let animate = !reduceMotion
+        let animate = !reduceMotion && !isDisplayAsleep
         let canvasWidth = round(size * (32.0 / 24.0))
         TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: !animate)) { context in
             let t = animate ? context.date.timeIntervalSinceReferenceDate : 0

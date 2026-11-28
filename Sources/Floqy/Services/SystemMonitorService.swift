@@ -18,16 +18,14 @@ final class SystemMonitorService: ObservableObject {
     private var processTimer: Timer?
     private var isRefreshingProcesses = false
     private var isSystemTabVisible = false
+    private var isDisplayAsleep = false
     private var lastAlertThresholdActive = false
 
     func start() {
         stop()
         refreshMemory()
-
-        memoryTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.refreshMemory()
-            }
+        if !isDisplayAsleep {
+            startMemoryTimer()
         }
     }
 
@@ -38,15 +36,46 @@ final class SystemMonitorService: ObservableObject {
         processTimer = nil
     }
 
+    func setDisplayAsleep(_ asleep: Bool) {
+        guard isDisplayAsleep != asleep else { return }
+        isDisplayAsleep = asleep
+        if asleep {
+            memoryTimer?.invalidate()
+            memoryTimer = nil
+            processTimer?.invalidate()
+            processTimer = nil
+        } else {
+            refreshMemory()
+            startMemoryTimer()
+            if isSystemTabVisible {
+                startProcessTimer()
+            }
+        }
+    }
+
     func setSystemTabVisible(_ visible: Bool) {
         guard isSystemTabVisible != visible else { return }
         isSystemTabVisible = visible
         processTimer?.invalidate()
         processTimer = nil
 
-        guard visible else { return }
+        guard visible, !isDisplayAsleep else { return }
+        startProcessTimer()
+    }
+
+    private func startMemoryTimer() {
+        memoryTimer?.invalidate()
+        memoryTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshMemory()
+            }
+        }
+    }
+
+    private func startProcessTimer() {
         refreshMemory()
         refreshProcessesAndPorts()
+        processTimer?.invalidate()
         processTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.refreshProcessesAndPorts()

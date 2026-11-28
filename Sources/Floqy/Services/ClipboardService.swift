@@ -11,6 +11,7 @@ final class ClipboardService: ObservableObject {
 
     private var timer: Timer?
     private var lastChangeCount: Int = NSPasteboard.general.changeCount
+    private var isDisplayAsleep = false
     private let maxEntries = 40
 
     private static var clipboardTempDir: URL {
@@ -32,6 +33,26 @@ final class ClipboardService: ObservableObject {
     func start() {
         stop()
         lastChangeCount = NSPasteboard.general.changeCount
+        if !isDisplayAsleep {
+            startPollingTimer()
+        }
+    }
+
+    func setDisplayAsleep(_ asleep: Bool) {
+        guard isDisplayAsleep != asleep else { return }
+        isDisplayAsleep = asleep
+        if asleep {
+            timer?.invalidate()
+            timer = nil
+        } else {
+            pruneExpiredEntries()
+            lastChangeCount = NSPasteboard.general.changeCount
+            startPollingTimer()
+        }
+    }
+
+    private func startPollingTimer() {
+        timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.pollPasteboard()
@@ -93,7 +114,7 @@ final class ClipboardService: ObservableObject {
 
         if let text = pasteboard.string(forType: .string) {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
+            guard !trimmed.isEmpty, ClipboardLogic.isTextWithinRetentionLimit(text) else { return }
             if let top = entries.first, top.kind != .image && top.textContent == text {
                 return
             }
@@ -118,6 +139,7 @@ final class ClipboardService: ObservableObject {
 
     private func insertEntry(_ entry: ClipboardEntry) {
         entries.insert(entry, at: 0)
+        pruneExpiredEntries()
         while entries.filter({ $0.kind == .image }).count > 5 {
             if let oldestUnpinnedImage = entries.lastIndex(where: { $0.kind == .image && !$0.isPinned }) {
                 cleanupTempFile(entries[oldestUnpinnedImage].fullImageURL)
@@ -135,6 +157,15 @@ final class ClipboardService: ObservableObject {
                 entries.removeLast()
             }
         }
+    }
+
+    private func pruneExpiredEntries(now: Date = Date()) {
+        let expiredIDs = ClipboardLogic.expiredUnpinnedIDs(in: entries, now: now)
+        guard !expiredIDs.isEmpty else { return }
+        for entry in entries where expiredIDs.contains(entry.id) {
+            cleanupTempFile(entry.fullImageURL)
+        }
+        entries.removeAll { expiredIDs.contains($0.id) }
     }
 
     private func writeTempImage(_ data: Data, id: UUID) -> URL? {

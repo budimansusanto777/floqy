@@ -1135,13 +1135,14 @@ struct EqualizerBarsView: View {
     let isPlaying: Bool
     var barCount: Int = 4
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isDisplayAsleep) private var isDisplayAsleep
 
     private let restHeights: [CGFloat] = [5, 8, 6, 7]
     private let activeHeightsA: [CGFloat] = [12, 7, 14, 9]
 
     var body: some View {
         let count = max(1, min(4, barCount))
-        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !isPlaying || reduceMotion)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !isPlaying || reduceMotion || isDisplayAsleep)) { context in
             let t = context.date.timeIntervalSinceReferenceDate
             HStack(alignment: .bottom, spacing: 2) {
                 ForEach(0..<count, id: \.self) { index in
