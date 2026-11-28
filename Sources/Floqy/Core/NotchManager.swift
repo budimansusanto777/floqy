@@ -4,7 +4,6 @@ import Combine
 import QuartzCore
 import ServiceManagement
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct MeetingHeadsUp: Equatable {
     let event: CalendarEventItem
@@ -42,6 +41,7 @@ final class NotchManager: ObservableObject {
     private static let displayPreferenceKey = "floqy.display.preference"
     private static let headphonesCardEnabledKey = "floqy.hardware.headphonesCardEnabled"
     private static let chargingCardEnabledKey = "floqy.hardware.chargingCardEnabled"
+    private static let lowBatteryAlertsEnabledKey = "floqy.hardware.lowBatteryAlertsEnabled"
     private static let shortcutBindingsKey = "floqy.shortcuts.bindings"
 
     @Published var mode: NotchMode = .idle {
@@ -105,7 +105,6 @@ final class NotchManager: ObservableObject {
     var effectiveThemePreset: NotchThemePreset {
         NotchThemePreset.resolved(for: mode, selected: themePreset)
     }
-    @Published private(set) var wallpaperImage: NSImage?
 
     @Published var headphonesCardEnabled: Bool {
         didSet {
@@ -115,6 +114,11 @@ final class NotchManager: ObservableObject {
     @Published var chargingCardEnabled: Bool {
         didSet {
             UserDefaults.standard.set(chargingCardEnabled, forKey: Self.chargingCardEnabledKey)
+        }
+    }
+    @Published var lowBatteryAlertsEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(lowBatteryAlertsEnabled, forKey: Self.lowBatteryAlertsEnabledKey)
         }
     }
     @Published var isEditingText: Bool = false
@@ -137,6 +141,7 @@ final class NotchManager: ObservableObject {
     let clipboard = ClipboardService()
     let system = SystemMonitorService()
     let ai = AIService()
+    let terminal = TerminalService()
     let hardware = HardwareStatusService()
     let cameraMirror = CameraMirrorService()
 
@@ -153,7 +158,6 @@ final class NotchManager: ObservableObject {
     private(set) var isHoveringCompactControls: Bool = false
     private var isTrackingMenu: Bool = false
     private var isPresentingFilePicker: Bool = false
-    private weak var activeWallpaperPanel: NSOpenPanel?
     private var cursorScreenMonitor: Any?
     private var lastCursorScreenCheck: CFTimeInterval = 0
     private var cancellables: Set<AnyCancellable> = []
@@ -200,9 +204,9 @@ final class NotchManager: ObservableObject {
         }
         self.displayPreference = initialDisplayPref
         self.themePreset = initialTheme
-        self.wallpaperImage = NSImage(contentsOf: Self.wallpaperStorageURL)
         self.headphonesCardEnabled = UserDefaults.standard.object(forKey: Self.headphonesCardEnabledKey) as? Bool ?? true
         self.chargingCardEnabled = UserDefaults.standard.object(forKey: Self.chargingCardEnabledKey) as? Bool ?? true
+        self.lowBatteryAlertsEnabled = UserDefaults.standard.object(forKey: Self.lowBatteryAlertsEnabledKey) as? Bool ?? true
         if let savedShortcutsData = UserDefaults.standard.data(forKey: Self.shortcutBindingsKey),
            let decoded = try? JSONDecoder().decode([ShortcutAction: GlobalShortcut].self, from: savedShortcutsData) {
             self.shortcutBindings = decoded
@@ -285,6 +289,12 @@ final class NotchManager: ObservableObject {
         hardware.onChargingConnected = { [weak self] status in
             self?.triggerChargingConnectedAlert(status)
         }
+        hardware.onLowBattery = { [weak self] status, level in
+            self?.triggerLowBatteryAlert(percentage: status.percentage, isCritical: level.isCritical)
+        }
+        hardware.onHeadphoneLowBattery = { [weak self] status, level in
+            self?.triggerHeadphoneLowBatteryAlert(status, isCritical: level.isCritical)
+        }
 
         music.$track
             .receive(on: RunLoop.main)
@@ -332,6 +342,9 @@ final class NotchManager: ObservableObject {
         }
 
         system.setSystemTabVisible(newMode.isExpanded && !isShowingInlineSettings && activeTab == .system)
+        if newMode.isExpanded {
+            calendar.refreshIfStale()
+        }
 
         let effectiveSubView: HomeSubView = (newMode.isExpanded && isShowingInlineSettings) ? .overview : homeSubView
         applyPanelFrame(for: newMode, tab: activeTab, subView: effectiveSubView) {
@@ -353,6 +366,9 @@ final class NotchManager: ObservableObject {
         }
         let targetMode: NotchMode = mode.isExpanded ? mode : .expanded
         system.setSystemTabVisible(targetMode.isExpanded && tab == .system)
+        if tab == .home {
+            calendar.refreshIfStale()
+        }
         applyPanelFrame(for: targetMode, tab: tab, subView: homeSubView) {
             isShowingInlineSettings = false
             activeTab = tab
@@ -572,6 +588,37 @@ final class NotchManager: ObservableObject {
         syncCollapsedMode()
     }
 
+    func triggerLowBatteryAlert(percentage: Int, isCritical: Bool) {
+        guard lowBatteryAlertsEnabled else { return }
+        if alertSoundsEnabled {
+            NSSound(named: NSSound.Name("Funk"))?.play()
+        }
+        activeAlert = .lowBattery(percentage: percentage, isCritical: isCritical)
+        scheduleAlertAutoDismiss(after: isCritical ? 8.0 : 6.0)
+        if mode.isExpanded {
+            showToast(isCritical ? "Battery critical · \(percentage)%" : "Low battery · \(percentage)%")
+        }
+        syncCollapsedMode()
+    }
+
+    func triggerHeadphoneLowBatteryAlert(_ status: HeadphoneStatus, isCritical: Bool) {
+        guard lowBatteryAlertsEnabled, let pct = status.batteryPercent else { return }
+        if alertSoundsEnabled {
+            NSSound(named: NSSound.Name("Funk"))?.play()
+        }
+        activeAlert = .headphoneLowBattery(
+            name: status.name,
+            batteryPercent: pct,
+            isAirPods: status.isAirPods,
+            isCritical: isCritical
+        )
+        scheduleAlertAutoDismiss(after: isCritical ? 7.0 : 5.5)
+        if mode.isExpanded {
+            showToast("\(status.name) · \(pct)%")
+        }
+        syncCollapsedMode()
+    }
+
     func triggerPomodoroCompletedAlert() {
         if alertSoundsEnabled {
             NSSound(named: NSSound.Name("Glass"))?.play()
@@ -632,7 +679,7 @@ final class NotchManager: ObservableObject {
         var nextHeadsUp: MeetingHeadsUp?
 
         for event in calendar.upcomingEvents {
-            guard let meetingURL = event.meetingURL,
+            guard !event.isAllDay,
                   let stage = CalendarLogic.meetingAlertStage(
                       now: currentNow,
                       startDate: event.startDate,
@@ -645,7 +692,7 @@ final class NotchManager: ObservableObject {
             case .startingNow:
                 if !triggeredStartingMeetingIDs.contains(event.id) {
                     triggeredStartingMeetingIDs.insert(event.id)
-                    presentMeetingStartingAlert(event: event, url: meetingURL)
+                    presentMeetingStartingAlert(event: event)
                 }
             case .headsUp(let minutesRemaining):
                 if case .meetingStarting(let activeEventId, _, _, _) = activeAlert, activeEventId == event.id {
@@ -663,15 +710,15 @@ final class NotchManager: ObservableObject {
         }
     }
 
-    private func presentMeetingStartingAlert(event: CalendarEventItem, url: URL) {
+    private func presentMeetingStartingAlert(event: CalendarEventItem) {
         if alertSoundsEnabled {
             NSSound(named: NSSound.Name("Ping"))?.play()
         }
         activeAlert = .meetingStarting(
             eventId: event.id,
             title: event.title,
-            provider: event.meetingProvider ?? "Meeting",
-            url: url
+            provider: event.meetingProvider,
+            url: event.meetingURL
         )
         scheduleAlertAutoDismiss(after: 45)
         if mode.isExpanded {
@@ -787,8 +834,8 @@ final class NotchManager: ObservableObject {
         hoverTask?.cancel()
 
         if hovering {
-            guard !mode.isExpanded && !mode.isAlert && !isHoveringCompactControls && !isPointerInCompactControlZone() else { return }
-            let delayMs = mode.isCompact ? 450 : 120
+            guard !mode.isExpanded && !mode.isAlert && !isHoveringCompactControls else { return }
+            let delayMs = mode.isCompact ? 160 : 120
             hoverTask = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(delayMs))
                 guard !Task.isCancelled,
@@ -813,112 +860,6 @@ final class NotchManager: ObservableObject {
                 self.collapse()
             }
         }
-    }
-
-    // MARK: - Custom Notch Wallpaper
-
-    private static var wallpaperStorageURL: URL {
-        FileManager.floqySupportDirectory
-            .appendingPathComponent("notch-wallpaper.jpg")
-    }
-
-    func chooseWallpaperImage() {
-        if let activeWallpaperPanel {
-            NSApp.activate(ignoringOtherApps: true)
-            activeWallpaperPanel.makeKeyAndOrderFront(nil)
-            return
-        }
-
-        hoverTask?.cancel()
-        isPresentingFilePicker = true
-        NSApp.activate(ignoringOtherApps: true)
-
-        let openPanel = NSOpenPanel()
-        openPanel.allowedContentTypes = [.image]
-        openPanel.allowsMultipleSelection = false
-        openPanel.canChooseDirectories = false
-        openPanel.prompt = "Choose"
-        openPanel.message = "Select an image to use as Floqy's notch wallpaper."
-        activeWallpaperPanel = openPanel
-
-        openPanel.begin { [weak self] response in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                defer {
-                    self.activeWallpaperPanel = nil
-                    self.isPresentingFilePicker = false
-                }
-                guard response == .OK,
-                      let selectedURL = openPanel.url,
-                      let sourceImage = NSImage(contentsOf: selectedURL),
-                      let prepared = Self.resizeWallpaperImage(sourceImage) else {
-                    return
-                }
-
-                let targetURL = Self.wallpaperStorageURL
-                try? FileManager.default.createDirectory(
-                    at: targetURL.deletingLastPathComponent(),
-                    withIntermediateDirectories: true
-                )
-                try? prepared.jpegData.write(to: targetURL, options: .atomic)
-
-                self.wallpaperImage = prepared.image
-                if !self.themePreset.usesWallpaper {
-                    self.themePreset = .wallpaperDark
-                }
-                self.showToast("Notch wallpaper updated")
-            }
-        }
-    }
-
-    func clearWallpaperImage() {
-        try? FileManager.default.removeItem(at: Self.wallpaperStorageURL)
-        wallpaperImage = nil
-        if themePreset == .wallpaperDark {
-            themePreset = .obsidian
-        } else if themePreset == .wallpaperLight {
-            themePreset = .pureWhite
-        }
-        showToast("Notch wallpaper cleared")
-    }
-
-    private static func resizeWallpaperImage(
-        _ image: NSImage,
-        maxDimension: CGFloat = 1280
-    ) -> (image: NSImage, jpegData: Data)? {
-        guard let tiffData = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffData) else { return nil }
-        let srcSize = CGSize(width: bitmap.pixelsWide, height: bitmap.pixelsHigh)
-        guard srcSize.width > 0, srcSize.height > 0 else { return nil }
-        let longest = max(srcSize.width, srcSize.height)
-        let scale = longest > maxDimension ? (maxDimension / longest) : 1.0
-        let targetSize = CGSize(
-            width: max(1, floor(srcSize.width * scale)),
-            height: max(1, floor(srcSize.height * scale))
-        )
-
-        guard let rep = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: Int(targetSize.width),
-            pixelsHigh: Int(targetSize.height),
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ) else { return nil }
-
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-        NSGraphicsContext.current?.imageInterpolation = .high
-        bitmap.draw(in: NSRect(origin: .zero, size: targetSize))
-        NSGraphicsContext.restoreGraphicsState()
-
-        guard let jpegData = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.86]),
-              let finalImage = NSImage(data: jpegData) else { return nil }
-        return (finalImage, jpegData)
     }
 
     // MARK: - Phase 2 Files Tray Staging
@@ -1262,7 +1203,9 @@ final class NotchManager: ObservableObject {
         updateCheckTask = Task { [weak self] in
             let nextStatus: UpdateCheckStatus
             do {
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let session = URLSession(configuration: .ephemeral)
+                defer { session.finishTasksAndInvalidate() }
+                let (data, response) = try await session.data(for: request)
                 if let http = response as? HTTPURLResponse, http.statusCode != 200 {
                     if http.statusCode == 403 || http.statusCode == 429 {
                         nextStatus = .failed("GitHub rate limit reached. Try again later.")

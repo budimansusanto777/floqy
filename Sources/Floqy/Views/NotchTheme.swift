@@ -13,7 +13,7 @@ extension EnvironmentValues {
     }
 }
 
-/// Complete WCAG-conscious palette for Floqy's notch shell, cards, controls, and wallpaper overlays.
+/// Complete WCAG-conscious palette for Floqy's notch shell, cards, and controls.
 struct NotchPalette {
     let notchBackground: Color
     let shellBorder: Color
@@ -32,9 +32,7 @@ struct NotchPalette {
     let statusHealthy: Color
     let statusWarning: Color
     let statusAlert: Color
-    let wallpaperScrim: Color
     let petAccentCutout: Color
-    let usesFrostedCards: Bool
     let isLight: Bool
 }
 
@@ -63,9 +61,7 @@ enum NotchColors {
     static var statusHealthy: Color { current.statusHealthy }
     static var statusWarning: Color { current.statusWarning }
     static var statusAlert: Color { current.statusAlert }
-    static var wallpaperScrim: Color { current.wallpaperScrim }
     static var petAccentCutout: Color { current.petAccentCutout }
-    static var usesFrostedCards: Bool { current.usesFrostedCards }
 
     static func palette(for preset: NotchThemePreset) -> NotchPalette {
         switch preset {
@@ -88,9 +84,7 @@ enum NotchColors {
                 statusHealthy: Color(red: 0.188, green: 0.820, blue: 0.345),
                 statusWarning: Color(red: 0.984, green: 0.749, blue: 0.141),
                 statusAlert: Color(red: 1.0, green: 0.478, blue: 0.522),
-                wallpaperScrim: .clear,
                 petAccentCutout: .black,
-                usesFrostedCards: false,
                 isLight: false
             )
 
@@ -113,9 +107,7 @@ enum NotchColors {
                 statusHealthy: Color(red: 0.188, green: 0.820, blue: 0.345),
                 statusWarning: Color(red: 0.984, green: 0.749, blue: 0.141),
                 statusAlert: Color(red: 1.0, green: 0.478, blue: 0.522),
-                wallpaperScrim: .clear,
                 petAccentCutout: .black,
-                usesFrostedCards: false,
                 isLight: false
             )
 
@@ -138,9 +130,7 @@ enum NotchColors {
                 statusHealthy: Color(red: 22 / 255, green: 163 / 255, blue: 74 / 255),
                 statusWarning: Color(red: 202 / 255, green: 138 / 255, blue: 4 / 255),
                 statusAlert: Color(red: 220 / 255, green: 38 / 255, blue: 38 / 255),
-                wallpaperScrim: .clear,
                 petAccentCutout: .white,
-                usesFrostedCards: false,
                 isLight: true
             )
 
@@ -163,9 +153,7 @@ enum NotchColors {
                 statusHealthy: Color(red: 22 / 255, green: 163 / 255, blue: 74 / 255),
                 statusWarning: Color(red: 217 / 255, green: 119 / 255, blue: 6 / 255),
                 statusAlert: Color(red: 225 / 255, green: 29 / 255, blue: 72 / 255),
-                wallpaperScrim: .clear,
                 petAccentCutout: .white,
-                usesFrostedCards: false,
                 isLight: true
             )
 
@@ -188,60 +176,8 @@ enum NotchColors {
                 statusHealthy: Color(red: 52 / 255, green: 211 / 255, blue: 153 / 255),
                 statusWarning: Color(red: 251 / 255, green: 191 / 255, blue: 36 / 255),
                 statusAlert: Color(red: 251 / 255, green: 113 / 255, blue: 133 / 255),
-                wallpaperScrim: .clear,
                 petAccentCutout: .black,
-                usesFrostedCards: false,
                 isLight: false
-            )
-
-        case .wallpaperDark:
-            return NotchPalette(
-                notchBackground: Color(red: 16 / 255, green: 18 / 255, blue: 24 / 255),
-                shellBorder: Color.white.opacity(0.18),
-                cardSurface: Color(red: 12 / 255, green: 13 / 255, blue: 18 / 255).opacity(0.68),
-                cardBorder: Color.white.opacity(0.16),
-                controlSurface: Color.white.opacity(0.11),
-                controlSubtle: Color.white.opacity(0.07),
-                controlSelected: Color.white.opacity(0.22),
-                controlBorder: Color.white.opacity(0.42),
-                trackBackground: Color.white.opacity(0.22),
-                textPrimary: .white,
-                textSecondary: Color.white.opacity(0.78),
-                accentPrimary: Color(red: 0.220, green: 0.741, blue: 0.973),
-                accentForeground: .black,
-                focusAccent: Color(red: 1.0, green: 0.624, blue: 0.039),
-                statusHealthy: Color(red: 0.188, green: 0.820, blue: 0.345),
-                statusWarning: Color(red: 0.984, green: 0.749, blue: 0.141),
-                statusAlert: Color(red: 1.0, green: 0.478, blue: 0.522),
-                wallpaperScrim: Color.black.opacity(0.44),
-                petAccentCutout: .black,
-                usesFrostedCards: true,
-                isLight: false
-            )
-
-        case .wallpaperLight:
-            return NotchPalette(
-                notchBackground: Color(red: 246 / 255, green: 244 / 255, blue: 247 / 255),
-                shellBorder: Color.black.opacity(0.16),
-                cardSurface: Color.white.opacity(0.78),
-                cardBorder: Color.black.opacity(0.12),
-                controlSurface: Color.black.opacity(0.07),
-                controlSubtle: Color.black.opacity(0.045),
-                controlSelected: Color.black.opacity(0.13),
-                controlBorder: Color.black.opacity(0.30),
-                trackBackground: Color.black.opacity(0.18),
-                textPrimary: Color(red: 22 / 255, green: 22 / 255, blue: 24 / 255),
-                textSecondary: Color(red: 78 / 255, green: 78 / 255, blue: 86 / 255),
-                accentPrimary: Color(red: 219 / 255, green: 39 / 255, blue: 119 / 255),
-                accentForeground: .white,
-                focusAccent: Color(red: 217 / 255, green: 119 / 255, blue: 6 / 255),
-                statusHealthy: Color(red: 22 / 255, green: 163 / 255, blue: 74 / 255),
-                statusWarning: Color(red: 202 / 255, green: 138 / 255, blue: 4 / 255),
-                statusAlert: Color(red: 220 / 255, green: 38 / 255, blue: 38 / 255),
-                wallpaperScrim: Color.white.opacity(0.38),
-                petAccentCutout: .white,
-                usesFrostedCards: true,
-                isLight: true
             )
         }
     }

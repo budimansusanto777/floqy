@@ -8,9 +8,11 @@ struct SettingsView: View {
     @ObservedObject private var calendar: CalendarService
     @ObservedObject private var obsidian: ObsidianService
     @ObservedObject private var productivity: ProductivityService
+    @ObservedObject private var ai: AIService
 
     @State private var recordingAction: ShortcutAction?
     @State private var shortcutFeedback: String?
+    @State private var hookFeedback: String?
     @State private var keyMonitor: Any?
 
     init(manager: NotchManager) {
@@ -18,6 +20,7 @@ struct SettingsView: View {
         self.calendar = manager.calendar
         self.obsidian = manager.obsidian
         self.productivity = manager.productivity
+        self.ai = manager.ai
     }
 
     var body: some View {
@@ -26,31 +29,6 @@ struct SettingsView: View {
                 Picker("Theme", selection: $manager.themePreset) {
                     ForEach(NotchThemePreset.allCases) { preset in
                         Text(preset.title).tag(preset)
-                    }
-                }
-                if manager.themePreset.usesWallpaper {
-                    LabeledContent("Notch wallpaper") {
-                        HStack(spacing: 8) {
-                            if let image = manager.wallpaperImage {
-                                Image(nsImage: image)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 36, height: 20)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                            .strokeBorder(Color.secondary.opacity(0.35), lineWidth: 0.75)
-                                    )
-                            }
-                            Button("Choose Image…") {
-                                manager.chooseWallpaperImage()
-                            }
-                            if manager.wallpaperImage != nil {
-                                Button("Remove") {
-                                    manager.clearWallpaperImage()
-                                }
-                            }
-                        }
                     }
                 }
                 Picker("Idle notch", selection: $manager.idleAppearance) {
@@ -66,6 +44,7 @@ struct SettingsView: View {
                 .disabled(!manager.idleAppearance.usesBottomChin)
                 Toggle("Headphones connected card", isOn: $manager.headphonesCardEnabled)
                 Toggle("Charging status card", isOn: $manager.chargingCardEnabled)
+                Toggle("Low battery alerts", isOn: $manager.lowBatteryAlertsEnabled)
                 Toggle("Auto-expand on hover", isOn: $manager.hoverToExpandEnabled)
                 Toggle("Notification sounds", isOn: $manager.alertSoundsEnabled)
                 Toggle("Start Floqy at login", isOn: Binding(
@@ -202,6 +181,39 @@ struct SettingsView: View {
                 Toggle("Alert when RAM exceeds \(SystemLogic.ramAlertThresholdPercent)%", isOn: $manager.ramAlertEnabled)
             }
 
+            Section("AI Agents & Hooks") {
+                ForEach(AIAgentKind.allCases) { agent in
+                    let isConnected = ai.hookStatus[agent] == true
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(agent.displayName)
+                            Text(agent.subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        if agent.supportsHook {
+                            Button(isConnected ? "Connected" : "Connect") {
+                                hookFeedback = ai.toggleHook(for: agent)
+                            }
+                            .foregroundStyle(isConnected ? .green : .accentColor)
+                        }
+
+                        Button("Open") {
+                            ai.openAgentApp(agent)
+                        }
+                    }
+                }
+
+                if let hookFeedback {
+                    Text(hookFeedback)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Display Geometry") {
                 Picker("Display", selection: $manager.displayPreference) {
                     ForEach(DisplayPreference.allCases) { pref in
@@ -282,6 +294,9 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 440, height: 550)
+        .onAppear {
+            ai.refreshHookStatus()
+        }
         .onDisappear {
             stopShortcutRecording()
         }

@@ -479,3 +479,95 @@ enum AIActivityLogic {
         }
     }
 }
+
+/// Snapshot of an open macOS Terminal.app tab/window discovered via AppleScript.
+struct TerminalSessionItem: Identifiable, Equatable, Hashable {
+    let id: String
+    let windowID: Int
+    let tabIndex: Int
+    let tty: String
+    let customTitle: String
+    let windowName: String
+    let processes: [String]
+    let isBusy: Bool
+
+    var displayName: String {
+        let custom = customTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !custom.isEmpty {
+            return custom
+        }
+        let title = windowName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty {
+            return title
+        }
+        let ttyName = URL(fileURLWithPath: tty).lastPathComponent
+        if !ttyName.isEmpty && ttyName != "/" {
+            return ttyName
+        }
+        return "Terminal \(windowID)"
+    }
+
+    var activeProcessLabel: String {
+        let shells: Set<String> = ["login", "-zsh", "zsh", "-bash", "bash"]
+        if let active = processes.last(where: { !shells.contains($0.lowercased()) && !$0.isEmpty }) {
+            return active
+        }
+        return processes.last(where: { !$0.isEmpty }) ?? "zsh"
+    }
+}
+
+/// Pure parsing and AppleScript-escaping helpers for Terminal.app session management.
+enum TerminalSessionLogic {
+    static let fieldSeparator = "\u{001F}"
+    static let rowSeparator = "\u{001E}"
+
+    static func parseTerminalSnapshot(_ raw: String) -> [TerminalSessionItem] {
+        guard !raw.isEmpty else { return [] }
+        var items: [TerminalSessionItem] = []
+        var seenIDs: Set<String> = []
+
+        for row in raw.components(separatedBy: rowSeparator) where !row.isEmpty {
+            let fields = row.components(separatedBy: fieldSeparator)
+            guard fields.count == 7,
+                  let windowID = Int(fields[0].trimmingCharacters(in: .whitespacesAndNewlines)),
+                  let tabIndex = Int(fields[1].trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                continue
+            }
+
+            let tty = fields[2].trimmingCharacters(in: .whitespacesAndNewlines)
+            let customTitle = fields[3].trimmingCharacters(in: .whitespacesAndNewlines)
+            let windowName = fields[4].trimmingCharacters(in: .whitespacesAndNewlines)
+            let isBusy = fields[5].trimmingCharacters(in: .whitespacesAndNewlines) == "1"
+            let processes = fields[6]
+                .components(separatedBy: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+
+            let id = tty.isEmpty ? "w\(windowID)-t\(tabIndex)" : tty
+            guard seenIDs.insert(id).inserted else { continue }
+
+            items.append(
+                TerminalSessionItem(
+                    id: id,
+                    windowID: windowID,
+                    tabIndex: tabIndex,
+                    tty: tty,
+                    customTitle: customTitle,
+                    windowName: windowName,
+                    processes: processes,
+                    isBusy: isBusy
+                )
+            )
+        }
+
+        return items
+    }
+
+    static func escapeAppleScriptString(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+    }
+}

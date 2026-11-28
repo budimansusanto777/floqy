@@ -119,6 +119,8 @@ struct NotchGeometry: Equatable {
             switch alert {
             case .headphonesConnected, .chargingConnected:
                 return CGSize(width: 376, height: max(86, notchSafeTopHeight + 52))
+            case .lowBattery, .headphoneLowBattery:
+                return CGSize(width: 388, height: max(86, notchSafeTopHeight + 52))
             case .aiFinished:
                 return CGSize(width: 392, height: max(84, notchSafeTopHeight + 50))
             case .pomodoroComplete, .meetingStarting:

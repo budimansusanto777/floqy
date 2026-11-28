@@ -23,7 +23,6 @@ final class SystemMonitorService: ObservableObject {
     func start() {
         stop()
         refreshMemory()
-        refreshProcessesAndPorts()
 
         memoryTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in

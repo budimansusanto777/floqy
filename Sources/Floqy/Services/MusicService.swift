@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import ImageIO
 
 /// Listens to Spotify & Apple Music playback notifications and controls active players via AppleScript.
 @MainActor
@@ -13,6 +14,7 @@ final class MusicService: ObservableObject {
 
     private static let spotifyBundleID = "com.spotify.client"
     private static let appleMusicBundleID = "com.apple.Music"
+    private static let artworkSession = URLSession(configuration: .ephemeral)
 
     private var observers: [NSObjectProtocol] = []
     private var playbackTimer: Timer?
@@ -299,9 +301,13 @@ final class MusicService: ObservableObject {
 
         if let url = track.artworkURL {
             do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                if cachedArtworkKey == key, let image = NSImage(data: data) {
-                    artworkImage = image
+                let (data, _) = try await Self.artworkSession.data(from: url)
+                let cgThumb = await Task.detached(priority: .utility) {
+                    Self.downscaledArtworkCGImage(from: data)
+                }.value
+                if cachedArtworkKey == key {
+                    artworkImage = cgThumb.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
+                        ?? NSImage(data: data)
                 }
                 return
             } catch {
@@ -314,7 +320,7 @@ final class MusicService: ObservableObject {
         }
 
         if track.source == .appleMusic {
-            let data = await Task.detached(priority: .utility) { () -> Data? in
+            let result = await Task.detached(priority: .utility) { () -> (cgImage: CGImage?, rawData: Data?) in
                 let script = NSAppleScript(source: """
                 tell application "Music"
                     if (count of artworks of current track) > 0 then
@@ -324,16 +330,34 @@ final class MusicService: ObservableObject {
                 """)
                 var error: NSDictionary?
                 let descriptor = script?.executeAndReturnError(&error)
-                return descriptor?.data
+                guard let data = descriptor?.data else { return (nil, nil) }
+                if let cgThumb = Self.downscaledArtworkCGImage(from: data) {
+                    return (cgThumb, nil)
+                }
+                return (nil, data)
             }.value
-            if cachedArtworkKey == key, let data, let image = NSImage(data: data) {
-                artworkImage = image
-            } else if cachedArtworkKey == key {
-                artworkImage = nil
+            if cachedArtworkKey == key {
+                if let cg = result.cgImage {
+                    artworkImage = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+                } else if let data = result.rawData {
+                    artworkImage = NSImage(data: data)
+                } else {
+                    artworkImage = nil
+                }
             }
         } else {
             artworkImage = nil
         }
+    }
+
+    private nonisolated static func downscaledArtworkCGImage(from data: Data, maxPixelSize: Int = 128) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
     private func isAppRunning(_ bundleIdentifier: String) -> Bool {

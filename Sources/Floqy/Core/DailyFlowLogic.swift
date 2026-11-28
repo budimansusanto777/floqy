@@ -152,37 +152,96 @@ enum CalendarLogic {
     static func extractMeetingURL(from candidates: [String?]) -> URL? {
         guard let detector = linkDetector else { return nil }
         for raw in candidates {
-            guard let text = raw, !text.isEmpty else { continue }
+            guard let rawText = raw, !rawText.isEmpty else { continue }
+            let text = rawText.replacingOccurrences(of: "&amp;", with: "&")
             let range = NSRange(text.startIndex..<text.endIndex, in: text)
             for match in detector.matches(in: text, options: [], range: range) {
-                guard let url = match.url, url.scheme?.lowercased() == "https" else { continue }
-                let trimmed = url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:)>]\"'"))
-                guard let cleanURL = URL(string: trimmed),
-                      meetingProvider(for: cleanURL) != nil else { continue }
-                return cleanURL
+                guard let url = match.url,
+                      let scheme = url.scheme?.lowercased(),
+                      scheme == "https" || scheme == "http" || scheme == "zoommtg" else { continue }
+                let trimmed = url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:)>]\"'<"))
+                guard let parsedURL = URL(string: trimmed) else { continue }
+                let normalizedURL: URL
+                if scheme == "http",
+                   var components = URLComponents(url: parsedURL, resolvingAgainstBaseURL: false) {
+                    components.scheme = "https"
+                    normalizedURL = components.url ?? parsedURL
+                } else {
+                    normalizedURL = parsedURL
+                }
+                guard meetingProvider(for: normalizedURL) != nil else { continue }
+                return normalizedURL
             }
         }
         return nil
     }
 
     static func meetingProvider(for url: URL) -> String? {
-        guard let host = url.host?.lowercased() else { return nil }
+        let scheme = url.scheme?.lowercased()
+        if scheme == "zoommtg" {
+            return "Zoom"
+        }
+        guard scheme == "https" || scheme == "http",
+              let host = url.host?.lowercased() else { return nil }
         let path = url.path.lowercased()
         if host == "meet.google.com", path.hasPrefix("/"), path.count > 1 {
             return "Google Meet"
         }
         if host == "zoom.us" || host.hasSuffix(".zoom.us"),
-           path.hasPrefix("/j/") || path.hasPrefix("/w/") {
+           path.hasPrefix("/j/") || path.hasPrefix("/w/") || path.hasPrefix("/s/") || path.hasPrefix("/my/") {
             return "Zoom"
         }
         if host == "teams.microsoft.com",
-           path.hasPrefix("/l/meetup-join/") || path.hasPrefix("/meet/") {
+           path.hasPrefix("/l/meetup-join/") || path.hasPrefix("/meet/") || path.hasPrefix("/dl/") {
             return "Teams"
         }
         if host == "teams.live.com", path.hasPrefix("/meet/") {
             return "Teams"
         }
+        if host == "webex.com" || host.hasSuffix(".webex.com"), path.count > 1 {
+            return "Webex"
+        }
+        if host == "app.slack.com", path.hasPrefix("/huddle/") {
+            return "Slack Huddle"
+        }
+        if (host.hasSuffix(".larksuite.com") || host.hasSuffix(".feishu.cn")),
+           (host.hasPrefix("vc.") || host.hasPrefix("meetings.") || path.contains("/vc/")) {
+            return "Lark"
+        }
+        if host == "meet.jit.si", path.count > 1 {
+            return "Jitsi"
+        }
+        if host == "whereby.com", path.count > 1 {
+            return "Whereby"
+        }
+        if host == "chime.aws", path.count > 1 {
+            return "Chime"
+        }
+        if (host == "meet.goto.com" || host == "global.gotomeeting.com"), path.count > 1 {
+            return "GoTo"
+        }
         return nil
+    }
+
+    static func prioritizeUpcoming<T>(
+        _ items: [T],
+        isAllDay: (T) -> Bool,
+        startDate: (T) -> Date,
+        endDate: (T) -> Date,
+        now: Date,
+        upcomingEnd: Date,
+        limit: Int = 10
+    ) -> [T] {
+        let filtered = items.filter { endDate($0) > now && startDate($0) <= upcomingEnd }
+        let sorted = filtered.sorted { lhs, rhs in
+            let lhsAllDay = isAllDay(lhs)
+            let rhsAllDay = isAllDay(rhs)
+            if lhsAllDay != rhsAllDay {
+                return !lhsAllDay && rhsAllDay
+            }
+            return startDate(lhs) < startDate(rhs)
+        }
+        return Array(sorted.prefix(max(0, limit)))
     }
 
     static func meetingAlertStage(now: Date, startDate: Date, endDate: Date) -> MeetingAlertStage? {

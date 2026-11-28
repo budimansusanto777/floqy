@@ -3,12 +3,14 @@ import SwiftUI
 /// Actionable alert pills displayed just below the hardware camera notch.
 enum NotchAlert: Equatable, Hashable {
     case pomodoroComplete(durationMinutes: Int)
-    case meetingStarting(eventId: String, title: String, provider: String, url: URL)
+    case meetingStarting(eventId: String, title: String, provider: String?, url: URL?)
     case cameraMirror
     case updating(version: String)
     case aiFinished(agent: AIAgentKind)
     case headphonesConnected(name: String, batteryPercent: Int?, isAirPods: Bool)
     case chargingConnected(batteryPercent: Int, etaText: String?)
+    case lowBattery(percentage: Int, isCritical: Bool)
+    case headphoneLowBattery(name: String, batteryPercent: Int, isAirPods: Bool, isCritical: Bool)
 }
 
 /// Represents the four visual states of the Floqy notch window.
@@ -158,7 +160,7 @@ enum NotchTab: String, CaseIterable, Identifiable, Hashable {
         case .files: return "Shelf"
         case .notes: return "Focus"
         case .clipboard: return "Board"
-        case .ai: return "AI"
+        case .ai: return "Code"
         case .system: return "System"
         }
     }
@@ -238,15 +240,13 @@ enum IdleNotchWidth: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
-/// Selectable visual themes for Floqy's notch shell, cards, and custom background image.
+/// Selectable visual themes for Floqy's notch shell and cards.
 enum NotchThemePreset: String, CaseIterable, Identifiable, Hashable {
     case obsidian
     case midnight
     case pureWhite
     case sakuraBlush
     case roseVelvet
-    case wallpaperDark
-    case wallpaperLight
 
     var id: String { rawValue }
 
@@ -257,17 +257,11 @@ enum NotchThemePreset: String, CaseIterable, Identifiable, Hashable {
         case .pureWhite: return "Pure White"
         case .sakuraBlush: return "Sakura Blush"
         case .roseVelvet: return "Rose Velvet"
-        case .wallpaperDark: return "Wallpaper (Dark)"
-        case .wallpaperLight: return "Wallpaper (Light)"
         }
     }
 
     var isLight: Bool {
-        self == .pureWhite || self == .sakuraBlush || self == .wallpaperLight
-    }
-
-    var usesWallpaper: Bool {
-        self == .wallpaperDark || self == .wallpaperLight
+        self == .pureWhite || self == .sakuraBlush
     }
 
     static func resolved(for mode: NotchMode, selected: NotchThemePreset) -> NotchThemePreset {

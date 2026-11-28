@@ -16,18 +16,12 @@ struct NotchCard<Content: View>: View {
             .padding(11)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(
-                ZStack {
-                    if palette.usesFrostedCards {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(palette.cardSurface)
+                    .overlay(
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(.ultraThinMaterial)
-                    }
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(palette.cardSurface)
-                }
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(palette.cardBorder, lineWidth: 1)
-                )
+                            .stroke(palette.cardBorder, lineWidth: 1)
+                    )
             )
     }
 }
@@ -233,7 +227,7 @@ struct HomeTabView: View {
                     .padding(.vertical, 2)
                     .accessibilityLabel("Back to Overview")
                     Button {
-                        calendar.refreshEvents()
+                        calendar.forceRefresh()
                     } label: {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 9.5, weight: .semibold))
@@ -312,7 +306,7 @@ struct HomeTabView: View {
                 } label: {
                     Text("Join")
                         .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundStyle(NotchColors.notchBackground)
+                        .foregroundStyle(NotchColors.accentForeground)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(RoundedRectangle(cornerRadius: 6).fill(NotchColors.accentPrimary))
@@ -335,97 +329,143 @@ struct HomeTabView: View {
     private var musicCard: some View {
         NotchCard {
             if let track = music.track {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .top, spacing: 10) {
                         artworkTile(image: music.artworkImage)
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(track.title)
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(NotchColors.textPrimary)
-                                .lineLimit(1)
-                            Text("\(track.artist) • \(track.source.rawValue)")
-                                .font(.system(size: 11))
-                                .foregroundStyle(NotchColors.textSecondary)
-                                .lineLimit(1)
-                        }
-
-                        Spacer(minLength: 4)
-
-                        EqualizerBarsView(isPlaying: track.isPlaying)
-                            .frame(height: 14)
-                    }
-
-                    VStack(spacing: 4) {
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule()
-                                    .fill(NotchColors.trackBackground)
-                                Capsule()
-                                    .fill(NotchColors.accentPrimary)
-                                    .frame(width: max(4, geo.size.width * track.progress))
+                        VStack(alignment: .leading, spacing: 0) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(track.title)
+                                    .font(.system(size: 12.5, weight: .semibold))
+                                    .foregroundStyle(NotchColors.textPrimary)
+                                    .lineLimit(2)
+                                Text(track.artist)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(NotchColors.textSecondary)
+                                    .lineLimit(1)
                             }
-                            .frame(height: 5)
-                            .contentShape(Rectangle())
-                            .gesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onEnded { value in
-                                        guard geo.size.width > 0 else { return }
-                                        let fraction = value.location.x / geo.size.width
-                                        music.seek(to: fraction)
+
+                            Spacer(minLength: 2)
+
+                            HStack(spacing: 6) {
+                                Button {
+                                    music.openPlayer(track.source)
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        if let icon = music.appIcon(for: track.source) {
+                                            Image(nsImage: icon)
+                                                .resizable()
+                                                .scaledToFit()
+                                                .frame(width: 11, height: 11)
+                                        } else {
+                                            Circle()
+                                                .fill(track.source == .spotify ? NotchColors.statusHealthy : NotchColors.statusAlert)
+                                                .frame(width: 6, height: 6)
+                                        }
+                                        Text(track.source.rawValue)
+                                            .font(.system(size: 10, weight: .medium))
+                                            .foregroundStyle(NotchColors.textSecondary)
+                                            .lineLimit(1)
                                     }
-                            )
-                        }
-                        .frame(height: 6)
-                        .accessibilityLabel("Track progress")
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2.5)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(NotchColors.controlSubtle)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 6)
+                                                    .stroke(NotchColors.cardBorder, lineWidth: 1)
+                                            )
+                                    )
+                                }
+                                .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
+                                .accessibilityLabel("Open \(track.source.rawValue)")
+                                .help("Open \(track.source.rawValue)")
 
-                        HStack {
+                                Spacer(minLength: 4)
+
+                                EqualizerBarsView(isPlaying: track.isPlaying)
+                                    .frame(height: 12)
+                            }
+                        }
+                        .frame(height: 68)
+                    }
+
+                    Spacer(minLength: 4)
+
+                    VStack(spacing: 8) {
+                        HStack(spacing: 7) {
                             Text(NowPlayingTrack.formatDuration(track.position))
-                            Spacer()
+                                .font(.system(size: 10, design: .monospaced))
+                                .monospacedDigit()
+                                .foregroundStyle(NotchColors.textSecondary)
+
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    Capsule()
+                                        .fill(NotchColors.trackBackground)
+                                        .frame(height: 5)
+                                    Capsule()
+                                        .fill(NotchColors.accentPrimary)
+                                        .frame(width: max(4, geo.size.width * track.progress), height: 5)
+                                }
+                                .frame(height: 14)
+                                .contentShape(Rectangle())
+                                .gesture(
+                                    DragGesture(minimumDistance: 0)
+                                        .onEnded { value in
+                                            guard geo.size.width > 0 else { return }
+                                            let fraction = value.location.x / geo.size.width
+                                            music.seek(to: fraction)
+                                        }
+                                )
+                            }
+                            .frame(height: 14)
+                            .accessibilityLabel("Track progress")
+
                             Text(NowPlayingTrack.formatDuration(track.duration))
+                                .font(.system(size: 10, design: .monospaced))
+                                .monospacedDigit()
+                                .foregroundStyle(NotchColors.textSecondary)
                         }
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(NotchColors.textSecondary)
+
+                        HStack(spacing: 20) {
+                            Button {
+                                music.previousTrack()
+                            } label: {
+                                Image(systemName: "backward.fill")
+                                    .font(.system(size: 12.5))
+                                    .foregroundStyle(NotchColors.textPrimary)
+                                    .frame(width: 28, height: 28)
+                            }
+                            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 8))
+                            .accessibilityLabel("Previous track")
+
+                            Button {
+                                music.togglePlayPause()
+                            } label: {
+                                Image(systemName: track.isPlaying ? "pause.fill" : "play.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(NotchColors.notchBackground)
+                                    .frame(width: 32, height: 32)
+                                    .background(Circle().fill(NotchColors.textPrimary))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(track.isPlaying ? "Pause" : "Play")
+
+                            Button {
+                                music.nextTrack()
+                            } label: {
+                                Image(systemName: "forward.fill")
+                                    .font(.system(size: 12.5))
+                                    .foregroundStyle(NotchColors.textPrimary)
+                                    .frame(width: 28, height: 28)
+                            }
+                            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 8))
+                            .accessibilityLabel("Next track")
+                        }
+                        .frame(maxWidth: .infinity)
                     }
-
-                    Spacer(minLength: 0)
-
-                    HStack(spacing: 18) {
-                        Button {
-                            music.previousTrack()
-                        } label: {
-                            Image(systemName: "backward.fill")
-                                .font(.system(size: 12.5))
-                                .foregroundStyle(NotchColors.textPrimary)
-                                .frame(width: 28, height: 28)
-                        }
-                        .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 8))
-                        .accessibilityLabel("Previous track")
-
-                        Button {
-                            music.togglePlayPause()
-                        } label: {
-                            Image(systemName: track.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 12.5))
-                                .foregroundStyle(NotchColors.notchBackground)
-                                .frame(width: 30, height: 30)
-                                .background(Circle().fill(NotchColors.textPrimary))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(track.isPlaying ? "Pause" : "Play")
-
-                        Button {
-                            music.nextTrack()
-                        } label: {
-                            Image(systemName: "forward.fill")
-                                .font(.system(size: 12.5))
-                                .foregroundStyle(NotchColors.textPrimary)
-                                .frame(width: 28, height: 28)
-                        }
-                        .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 8))
-                        .accessibilityLabel("Next track")
-                    }
-                    .frame(maxWidth: .infinity)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 8) {
@@ -453,7 +493,9 @@ struct HomeTabView: View {
                     }
                 }
                 .onAppear {
-                    music.refreshInstalledPlayers()
+                    if music.installedSources.isEmpty {
+                        music.refreshInstalledPlayers()
+                    }
                 }
             }
         }
@@ -533,19 +575,23 @@ struct HomeTabView: View {
             Image(nsImage: image)
                 .resizable()
                 .scaledToFill()
-                .frame(width: 36, height: 36)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-        } else {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(NotchColors.controlSurface)
+                .frame(width: 68, height: 68)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .stroke(NotchColors.cardBorder, lineWidth: 1)
                 )
-                .frame(width: 36, height: 36)
+        } else {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(NotchColors.controlSurface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(NotchColors.cardBorder, lineWidth: 1)
+                )
+                .frame(width: 68, height: 68)
                 .overlay(
                     Image(systemName: "music.note")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(NotchColors.accentPrimary)
                 )
         }
@@ -655,6 +701,16 @@ struct HomeTabView: View {
                 }
                 .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
                 .accessibilityLabel("Open Calendar view")
+                Button {
+                    calendar.forceRefresh()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(NotchColors.textSecondary)
+                        .frame(width: 20, height: 18)
+                }
+                .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
+                .accessibilityLabel("Refresh calendar")
             }
 
             HStack(spacing: 8) {
@@ -675,7 +731,7 @@ struct HomeTabView: View {
                     } label: {
                         Text("Join")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(NotchColors.notchBackground)
+                            .foregroundStyle(NotchColors.accentForeground)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
                             .background(RoundedRectangle(cornerRadius: 7).fill(NotchColors.accentPrimary))
@@ -703,7 +759,7 @@ struct HomeTabView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             Button {
-                calendar.refreshEvents()
+                calendar.forceRefresh()
             } label: {
                 Text("Refresh")
                     .font(.system(size: 10.5, weight: .medium))
@@ -1841,11 +1897,16 @@ struct ClipboardTabView: View {
     }
 }
 
-// MARK: - 5. AI Agent Tab
+// MARK: - 5. AI Agent & Terminal Tab
 
 struct AITabView: View {
     @ObservedObject var manager: NotchManager
     @ObservedObject var ai: AIService
+    @ObservedObject var terminal: TerminalService
+
+    @State private var editingSessionID: String?
+    @State private var renameDraft: String = ""
+    @FocusState private var isRenameFocused: Bool
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -1857,12 +1918,17 @@ struct AITabView: View {
     var body: some View {
         HStack(spacing: 10) {
             activityCard
-            agentsCard
+            terminalsCard
         }
         .onAppear {
             ai.syncDayIfNeeded()
-            ai.refreshHookStatus()
             ai.refreshClaudeLocalUsage()
+            terminal.refresh()
+        }
+        .onDisappear {
+            if editingSessionID != nil {
+                cancelRename()
+            }
         }
     }
 
@@ -1889,6 +1955,16 @@ struct AITabView: View {
                                     : NotchColors.controlSurface
                             )
                         )
+
+                    Button("Hooks") {
+                        manager.onOpenFullSettings?()
+                    }
+                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(NotchColors.textSecondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .help("Configure AI agent hooks in Settings")
                 }
 
                 HStack(spacing: 5) {
@@ -1919,7 +1995,7 @@ struct AITabView: View {
                 Divider().overlay(NotchColors.cardBorder)
 
                 if ai.recentCompletions.isEmpty {
-                    Text("Connect a hook to receive completion alerts.")
+                    Text("Connect a hook in Settings to receive completion alerts.")
                         .font(.system(size: 10.5))
                         .foregroundStyle(NotchColors.textSecondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -1958,25 +2034,101 @@ struct AITabView: View {
         }
     }
 
-    private var agentsCard: some View {
+    private var terminalsCard: some View {
         NotchCard {
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Label("Agents", systemImage: "bolt.fill")
+                HStack(spacing: 6) {
+                    Label("Terminals", systemImage: "terminal")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(NotchColors.textPrimary)
-                    Spacer()
-                    Text("Hooks")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(NotchColors.textSecondary)
+
+                    if !terminal.sessions.isEmpty {
+                        Text("\(terminal.sessions.count)")
+                            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(NotchColors.textSecondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(NotchColors.controlSurface))
+                    }
+
+                    Spacer(minLength: 4)
+
+                    Button {
+                        terminal.refresh()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(NotchColors.textSecondary)
+                            .frame(width: 20, height: 18)
+                    }
+                    .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
+                    .accessibilityLabel("Refresh terminals")
+
+                    Button {
+                        terminal.createNewWindow()
+                    } label: {
+                        Text("+ New")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(NotchColors.accentForeground)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(NotchColors.accentPrimary))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("New Terminal window")
                 }
 
                 Divider().overlay(NotchColors.cardBorder)
 
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 5) {
-                        ForEach(AIAgentKind.allCases) { agent in
-                            agentRow(agent)
+                if terminal.permissionDenied {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Automation access required for Terminal.")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(NotchColors.textPrimary)
+                        Button {
+                            terminal.openAutomationPrivacySettings()
+                        } label: {
+                            Text("Open Settings")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(NotchColors.accentPrimary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(NotchColors.accentPrimary.opacity(0.14))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                } else if terminal.sessions.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("No open terminals.")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(NotchColors.textPrimary)
+                        Text("Open a Terminal window to rename and jump to it here.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(NotchColors.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button {
+                            terminal.createNewWindow()
+                        } label: {
+                            Text("New Terminal")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(NotchColors.accentForeground)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(NotchColors.accentPrimary))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                } else {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 5) {
+                            ForEach(terminal.sessions) { session in
+                                terminalRow(session)
+                            }
                         }
                     }
                 }
@@ -1984,52 +2136,124 @@ struct AITabView: View {
         }
     }
 
-    private func agentRow(_ agent: AIAgentKind) -> some View {
-        let isConnected = ai.hookStatus[agent] == true
+    private func terminalRow(_ session: TerminalSessionItem) -> some View {
+        let isEditing = editingSessionID == session.id
 
         return HStack(spacing: 6) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(agent.displayName)
-                    .font(.system(size: 10.5, weight: .semibold))
+            Circle()
+                .fill(session.isBusy ? NotchColors.statusHealthy : NotchColors.textSecondary.opacity(0.45))
+                .frame(width: 6, height: 6)
+
+            if isEditing {
+                TextField("Terminal name", text: $renameDraft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(NotchColors.textPrimary)
-                    .lineLimit(1)
-                Text(agent.subtitle)
-                    .font(.system(size: 9))
-                    .foregroundStyle(NotchColors.textSecondary)
-                    .lineLimit(1)
-            }
+                    .focused($isRenameFocused)
+                    .onSubmit {
+                        commitRename(session)
+                    }
+                    .onKeyPress(.escape) {
+                        cancelRename()
+                        return .handled
+                    }
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(NotchColors.notchBackground)
+                            .overlay(RoundedRectangle(cornerRadius: 5).stroke(NotchColors.accentPrimary, lineWidth: 1))
+                    )
 
-            Spacer(minLength: 4)
+                Button {
+                    commitRename(session)
+                } label: {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9.5, weight: .bold))
+                        .foregroundStyle(NotchColors.statusHealthy)
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
+                .accessibilityLabel("Save terminal name")
 
-            if agent.supportsHook {
-                Button(isConnected ? "Connected" : "Connect") {
-                    let message = ai.toggleHook(for: agent)
-                    manager.showToast(message)
+                Button {
+                    cancelRename()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(NotchColors.textSecondary)
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
+                .accessibilityLabel("Cancel rename")
+            } else {
+                Button {
+                    terminal.focus(session)
+                    manager.collapse()
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(session.displayName)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(NotchColors.textPrimary)
+                            .lineLimit(1)
+
+                        Spacer(minLength: 4)
+
+                        Text(session.activeProcessLabel)
+                            .font(.system(size: 9.5, design: .monospaced))
+                            .foregroundStyle(NotchColors.textSecondary)
+                            .lineLimit(1)
+                    }
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 9.5, weight: .semibold))
-                .foregroundStyle(isConnected ? NotchColors.statusHealthy : NotchColors.accentPrimary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill((isConnected ? NotchColors.statusHealthy : NotchColors.accentPrimary).opacity(0.14))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 5)
-                                .stroke((isConnected ? NotchColors.statusHealthy : NotchColors.accentPrimary).opacity(0.35), lineWidth: 1)
-                        )
-                )
-            }
 
-            Button("Open") {
-                ai.openAgentApp(agent)
+                Button {
+                    startRename(session)
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(NotchColors.textSecondary)
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
+                .accessibilityLabel("Rename \(session.displayName)")
             }
-            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 5))
-            .font(.system(size: 9.5, weight: .semibold))
-            .foregroundStyle(NotchColors.textPrimary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
         }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(NotchColors.controlSubtle)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(NotchColors.cardBorder, lineWidth: 1))
+        )
+    }
+
+    private func startRename(_ session: TerminalSessionItem) {
+        editingSessionID = session.id
+        renameDraft = session.displayName
+        manager.beginTextInput()
+        DispatchQueue.main.async {
+            isRenameFocused = true
+        }
+    }
+
+    private func commitRename(_ session: TerminalSessionItem) {
+        let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        cancelRename()
+        guard !trimmed.isEmpty else { return }
+        Task {
+            let ok = await terminal.rename(session, to: trimmed)
+            if ok {
+                manager.showToast("Renamed terminal")
+            }
+        }
+    }
+
+    private func cancelRename() {
+        editingSessionID = nil
+        isRenameFocused = false
+        manager.endTextInput()
     }
 
     private func counterTile(title: String, count: Int) -> some View {
@@ -2313,76 +2537,48 @@ struct InlineSettingsTabView: View {
                         .buttonStyle(.plain)
                     }
 
-                    if manager.themePreset.usesWallpaper {
-                        HStack(spacing: 6) {
-                            Text("Wallpaper")
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(NotchColors.textPrimary)
-                            Spacer(minLength: 6)
-                            Button("Choose…") {
-                                manager.chooseWallpaperImage()
-                            }
-                            .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
-                            .font(.system(size: 10.5, weight: .semibold))
+                    HStack(spacing: 8) {
+                        Text("Idle width")
+                            .font(.system(size: 11.5))
                             .foregroundStyle(NotchColors.textPrimary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3.5)
-
-                            if manager.wallpaperImage != nil {
-                                Button("Clear") {
-                                    manager.clearWallpaperImage()
+                        Spacer(minLength: 8)
+                        HStack(spacing: 2) {
+                            ForEach(IdleNotchWidth.allCases) { widthOption in
+                                let selected = manager.idleWidth == widthOption
+                                Button {
+                                    manager.idleWidth = widthOption
+                                } label: {
+                                    Text(widthOption.title)
+                                        .font(.system(size: 10.5, weight: selected ? .semibold : .medium))
+                                        .foregroundStyle(selected ? NotchColors.textPrimary : NotchColors.textSecondary)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 3)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                                                .fill(selected ? NotchColors.statusHealthy.opacity(0.24) : Color.clear)
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                                                .strokeBorder(
+                                                    selected ? NotchColors.statusHealthy.opacity(0.75) : Color.clear,
+                                                    lineWidth: 1
+                                                )
+                                        )
                                 }
-                                .buttonStyle(NotchInteractiveButtonStyle(cornerRadius: 6))
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(NotchColors.textSecondary)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3.5)
+                                .buttonStyle(.plain)
                             }
                         }
-                    } else {
-                        HStack(spacing: 8) {
-                            Text("Idle width")
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(NotchColors.textPrimary)
-                            Spacer(minLength: 8)
-                            HStack(spacing: 2) {
-                                ForEach(IdleNotchWidth.allCases) { widthOption in
-                                    let selected = manager.idleWidth == widthOption
-                                    Button {
-                                        manager.idleWidth = widthOption
-                                    } label: {
-                                        Text(widthOption.title)
-                                            .font(.system(size: 10.5, weight: selected ? .semibold : .medium))
-                                            .foregroundStyle(selected ? NotchColors.textPrimary : NotchColors.textSecondary)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 3)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 5.5, style: .continuous)
-                                                    .fill(selected ? NotchColors.statusHealthy.opacity(0.24) : Color.clear)
-                                            )
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 5.5, style: .continuous)
-                                                    .strokeBorder(
-                                                        selected ? NotchColors.statusHealthy.opacity(0.75) : Color.clear,
-                                                        lineWidth: 1
-                                                    )
-                                            )
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(2)
-                            .background(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(NotchColors.controlSurface)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .strokeBorder(NotchColors.cardBorder, lineWidth: 1)
-                            )
-                            .opacity(manager.idleAppearance.usesBottomChin ? 1 : 0.4)
-                            .disabled(!manager.idleAppearance.usesBottomChin)
-                        }
+                        .padding(2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(NotchColors.controlSurface)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .strokeBorder(NotchColors.cardBorder, lineWidth: 1)
+                        )
+                        .opacity(manager.idleAppearance.usesBottomChin ? 1 : 0.4)
+                        .disabled(!manager.idleAppearance.usesBottomChin)
                     }
 
                     HStack(spacing: 8) {
@@ -2424,18 +2620,21 @@ struct InlineSettingsTabView: View {
             }
 
             NotchCard {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text("Cards & Alerts")
                         .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(NotchColors.textSecondary)
 
-                    toggleRow("Headphones connected card", isOn: $manager.headphonesCardEnabled)
-                    toggleRow("Charging status card", isOn: $manager.chargingCardEnabled)
-                    toggleRow("Auto-expand on hover", isOn: $manager.hoverToExpandEnabled)
-                    toggleRow("Notification sounds", isOn: $manager.alertSoundsEnabled)
-                    toggleRow("RAM ≥ \(SystemLogic.ramAlertThresholdPercent)% alert", isOn: $manager.ramAlertEnabled)
-
-                    Spacer(minLength: 0)
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            toggleRow("Headphones connected card", isOn: $manager.headphonesCardEnabled)
+                            toggleRow("Charging status card", isOn: $manager.chargingCardEnabled)
+                            toggleRow("Low battery alerts", isOn: $manager.lowBatteryAlertsEnabled)
+                            toggleRow("Auto-expand on hover", isOn: $manager.hoverToExpandEnabled)
+                            toggleRow("Notification sounds", isOn: $manager.alertSoundsEnabled)
+                            toggleRow("RAM ≥ \(SystemLogic.ramAlertThresholdPercent)% alert", isOn: $manager.ramAlertEnabled)
+                        }
+                    }
                 }
             }
         }

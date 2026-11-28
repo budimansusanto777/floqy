@@ -39,7 +39,7 @@ struct FloqyAIPetSpriteView: View {
     var body: some View {
         let animate = !reduceMotion
         let canvasWidth = round(size * (32.0 / 24.0))
-        TimelineView(.animation(paused: !animate)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: !animate)) { context in
             let t = animate ? context.date.timeIntervalSinceReferenceDate : 0
             Canvas { ctx, canvasSize in
                 drawSprite(in: &ctx, size: canvasSize, time: t)

@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Manages Floqy's macOS menu bar item (NSStatusItem) and quick-access menu.
 @MainActor
-final class StatusBarController: NSObject {
+final class StatusBarController: NSObject, NSWindowDelegate {
     private let statusItem: NSStatusItem
     private weak var notchManager: NotchManager?
     private var settingsWindow: NSWindow?
@@ -127,6 +127,7 @@ final class StatusBarController: NSObject {
             )
             window.title = "Floqy Settings"
             window.isReleasedWhenClosed = false
+            window.delegate = self
             window.contentView = NSHostingView(rootView: SettingsView(manager: notchManager))
             window.center()
             settingsWindow = window
@@ -134,6 +135,12 @@ final class StatusBarController: NSObject {
 
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard (notification.object as? NSWindow) === settingsWindow else { return }
+        settingsWindow?.contentView = nil
+        settingsWindow = nil
     }
 
     @objc private func checkForUpdates() {

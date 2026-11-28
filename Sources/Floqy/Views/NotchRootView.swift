@@ -4,6 +4,7 @@ import SwiftUI
 struct NotchRootView: View {
     @ObservedObject var manager: NotchManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isExpandedContentVisible: Bool = false
 
     private var effectiveHomeSubView: HomeSubView {
         manager.isShowingInlineSettings ? .overview : manager.homeSubView
@@ -94,8 +95,8 @@ struct NotchRootView: View {
             return .easeInOut(duration: expanding ? 0.16 : 0.14)
         }
         return expanding
-            ? .spring(response: 0.34, dampingFraction: 0.85)
-            : .spring(response: 0.24, dampingFraction: 0.98)
+            ? .spring(response: 0.28, dampingFraction: 0.88)
+            : .spring(response: 0.22, dampingFraction: 0.96)
     }
 
     var body: some View {
@@ -108,28 +109,16 @@ struct NotchRootView: View {
             bottomRadius: bottomRadius,
             taperedChinInset: taperedChinInset,
             leftLeadingInset: leftLeadingInset,
-            activeTheme: activeTheme,
             isDragTargeted: manager.isDragTargeted
         )
 
         ZStack(alignment: .top) {
             // 1. Background layer (animates shell geometry cleanly with spring).
-            ZStack(alignment: .top) {
-                palette.notchBackground
-
-                if activeTheme.usesWallpaper, let image = manager.wallpaperImage {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: totalWidth, height: shellSize.height)
-                        .clipped()
-
-                    palette.wallpaperScrim
-                }
-            }
-            .frame(width: totalWidth, height: shellSize.height, alignment: .top)
-            .clipShape(shellShape)
-            .animation(shellAnimation, value: animKey)
+            palette.notchBackground
+                .animation(.easeOut(duration: manager.mode.isExpanded ? 0.14 : 0.08), value: activeTheme)
+                .frame(width: totalWidth, height: shellSize.height, alignment: .top)
+                .clipShape(shellShape)
+                .animation(shellAnimation, value: animKey)
 
             // 2. Content layer (synchronous teardown on frame 0 so outgoing mode views never overlap).
             Group {
@@ -159,6 +148,9 @@ struct NotchRootView: View {
                 case .expanded:
                     NotchExpandedView(manager: manager)
                         .frame(width: expandedSize.width, height: expandedSize.height)
+                        .opacity(reduceMotion || isExpandedContentVisible ? 1 : 0)
+                        .scaleEffect(reduceMotion || isExpandedContentVisible ? 1 : 0.97, anchor: .top)
+                        .offset(y: reduceMotion || isExpandedContentVisible ? 0 : -6)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -181,6 +173,25 @@ struct NotchRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.notchThemePreset, activeTheme)
         .preferredColorScheme(activeTheme.isLight ? .light : .dark)
+        .onAppear {
+            if manager.mode.isExpanded {
+                isExpandedContentVisible = true
+            }
+        }
+        .onChange(of: manager.mode.isExpanded) { _, expanded in
+            if expanded {
+                if reduceMotion {
+                    isExpandedContentVisible = true
+                } else {
+                    isExpandedContentVisible = false
+                    withAnimation(.easeOut(duration: 0.16).delay(0.04)) {
+                        isExpandedContentVisible = true
+                    }
+                }
+            } else {
+                isExpandedContentVisible = false
+            }
+        }
     }
 }
 
@@ -191,6 +202,5 @@ private struct ShellAnimationKey: Equatable {
     let bottomRadius: CGFloat
     let taperedChinInset: CGFloat
     let leftLeadingInset: CGFloat
-    let activeTheme: NotchThemePreset
     let isDragTargeted: Bool
 }

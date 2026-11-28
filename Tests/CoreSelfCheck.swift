@@ -20,7 +20,8 @@ enum CoreSelfCheck {
         checkUpdateLogic()
         checkShortcutAndMirrorLogic()
         checkDualSlotCompactLogic()
-        print("CoreSelfCheck: 16/16 checks passed.")
+        checkTerminalSessionLogic()
+        print("CoreSelfCheck: 17/17 checks passed.")
     }
 
     private static func checkNotchedScreenDetection() {
@@ -159,6 +160,39 @@ enum CoreSelfCheck {
         let zoomURL = CalendarLogic.extractMeetingURL(from: ["https://us02web.zoom.us/j/123456789?pwd=xyz"])
         precondition(zoomURL?.host == "us02web.zoom.us", "Failed to extract Zoom URL")
 
+        let bareMeet = CalendarLogic.extractMeetingURL(from: ["meet.google.com/abc-defg-hij"])
+        precondition(bareMeet?.absoluteString == "https://meet.google.com/abc-defg-hij", "Bare Meet URL must normalize to https")
+
+        let zoomShort = CalendarLogic.extractMeetingURL(from: ["https://zoom.us/s/987654&amp;pwd=abc"])
+        precondition(zoomShort?.absoluteString == "https://zoom.us/s/987654&pwd=abc" && CalendarLogic.meetingProvider(for: zoomShort!) == "Zoom", "Zoom /s/ + HTML &amp; URL parsing failed")
+
+        let webexURL = CalendarLogic.extractMeetingURL(from: ["https://company.webex.com/meet/alex"])
+        precondition(webexURL != nil && CalendarLogic.meetingProvider(for: webexURL!) == "Webex", "Webex URL parsing failed")
+
+        let sampleNow = Date(timeIntervalSince1970: 1_700_000_000)
+        struct TestCalendarEntry {
+            let id: String
+            let isAllDay: Bool
+            let startDate: Date
+            let endDate: Date
+        }
+        let sampleCalendar = [
+            TestCalendarEntry(id: "allday-1", isAllDay: true, startDate: sampleNow.addingTimeInterval(-3600), endDate: sampleNow.addingTimeInterval(20 * 3600)),
+            TestCalendarEntry(id: "allday-2", isAllDay: true, startDate: sampleNow.addingTimeInterval(-3600), endDate: sampleNow.addingTimeInterval(20 * 3600)),
+            TestCalendarEntry(id: "allday-3", isAllDay: true, startDate: sampleNow.addingTimeInterval(-3600), endDate: sampleNow.addingTimeInterval(20 * 3600)),
+            TestCalendarEntry(id: "timed-meeting", isAllDay: false, startDate: sampleNow.addingTimeInterval(180), endDate: sampleNow.addingTimeInterval(1980)),
+        ]
+        let prioritized = CalendarLogic.prioritizeUpcoming(
+            sampleCalendar,
+            isAllDay: \.isAllDay,
+            startDate: \.startDate,
+            endDate: \.endDate,
+            now: sampleNow,
+            upcomingEnd: sampleNow.addingTimeInterval(7 * 24 * 3600),
+            limit: 3
+        )
+        precondition(prioritized.first?.id == "timed-meeting", "Timed meeting must precede all-day events even when capped")
+
         let ignoredURL = CalendarLogic.extractMeetingURL(from: ["https://github.com/budimansusanto777/floqy"])
         precondition(ignoredURL == nil, "Non-meeting URL should be ignored")
 
@@ -289,6 +323,13 @@ enum CoreSelfCheck {
         let older = ClipboardEntry(kind: .text, textContent: "alpha note", isPinned: false, createdAt: refDate)
         let pinned = ClipboardEntry(kind: .url, textContent: "https://example.com", isPinned: true, createdAt: refDate.addingTimeInterval(-100))
         let newer = ClipboardEntry(kind: .code, textContent: "let alpha = 1", isPinned: false, createdAt: refDate.addingTimeInterval(60))
+        let spilledImage = ClipboardEntry(
+            kind: .image,
+            textContent: "Image (1920 × 1080)",
+            imageData: Data([0x89, 0x50]),
+            fullImageURL: URL(fileURLWithPath: "/tmp/test-clip.img")
+        )
+        precondition(spilledImage.fullImageURL?.lastPathComponent == "test-clip.img", "Spilled clipboard image URL mismatch")
 
         let sortedAll = ClipboardLogic.filterAndSort([older, pinned, newer], query: "")
         precondition(sortedAll.map(\.id) == [pinned.id, newer.id, older.id], "Pinned must sort first, then newest")
@@ -596,10 +637,9 @@ enum CoreSelfCheck {
         precondition(IdleAppearance.cat.isSideWing && IdleAppearance.dog.isSideWing && !IdleAppearance.eyes.isSideWing, "Cat and Dog use single-row side wings")
         precondition(!IdleAppearance.cat.usesBottomChin && IdleAppearance.eyes.usesBottomChin, "Only non-wing visible idle styles use bottom chin")
         precondition(IdleNotchWidth.allCases.count == 2, "IdleNotchWidth must expose Compact and Full")
-        precondition(NotchThemePreset.allCases.count == 7, "NotchThemePreset must expose 7 presets")
-        precondition(NotchThemePreset.pureWhite.isLight && NotchThemePreset.sakuraBlush.isLight && NotchThemePreset.wallpaperLight.isLight, "Light theme flags mismatch")
-        precondition(!NotchThemePreset.obsidian.isLight && !NotchThemePreset.midnight.isLight && !NotchThemePreset.roseVelvet.isLight && !NotchThemePreset.wallpaperDark.isLight, "Dark theme flags mismatch")
-        precondition(NotchThemePreset.wallpaperDark.usesWallpaper && NotchThemePreset.wallpaperLight.usesWallpaper && !NotchThemePreset.sakuraBlush.usesWallpaper, "Wallpaper flag mismatch")
+        precondition(NotchThemePreset.allCases.count == 5, "NotchThemePreset must expose 5 presets")
+        precondition(NotchThemePreset.pureWhite.isLight && NotchThemePreset.sakuraBlush.isLight, "Light theme flags mismatch")
+        precondition(!NotchThemePreset.obsidian.isLight && !NotchThemePreset.midnight.isLight && !NotchThemePreset.roseVelvet.isLight, "Dark theme flags mismatch")
         precondition(NotchThemePreset.resolved(for: .idle, selected: .pureWhite) == .obsidian, "Idle notch must keep Obsidian black")
         precondition(NotchThemePreset.resolved(for: .compact(.music), selected: .sakuraBlush) == .obsidian, "Compact notch must keep Obsidian black")
         precondition(NotchThemePreset.resolved(for: .expanded, selected: .pureWhite) == .pureWhite, "Expanded notch must apply selected theme")
@@ -664,6 +704,34 @@ enum CoreSelfCheck {
         precondition(taperedShape.taperedChinInset == 36, "NotchShellShape animatableData must drive taperedChinInset")
         let taperedPath = taperedShape.path(in: CGRect(origin: .zero, size: eyesIdle))
         precondition(!taperedPath.isEmpty, "Tapered mini-chin shape must produce a valid path")
+
+        let bat35 = BatteryStatus(percentage: 35, isCharging: false, isPluggedIn: false, timeToFullMinutes: nil)
+        let bat20 = BatteryStatus(percentage: 20, isCharging: false, isPluggedIn: false, timeToFullMinutes: nil)
+        let bat19 = BatteryStatus(percentage: 19, isCharging: false, isPluggedIn: false, timeToFullMinutes: nil)
+        let bat10 = BatteryStatus(percentage: 10, isCharging: false, isPluggedIn: false, timeToFullMinutes: nil)
+        let bat10Charging = BatteryStatus(percentage: 10, isCharging: true, isPluggedIn: true, timeToFullMinutes: 60)
+
+        let launchLow = HardwareStatusLogic.lowBatteryAlertToTrigger(previous: nil, current: bat20, lastAlertedThreshold: nil)
+        precondition(launchLow.level == nil && launchLow.nextAlertedThreshold == 20, "Launch at 20% must seed silently without flashing")
+
+        let cross20 = HardwareStatusLogic.lowBatteryAlertToTrigger(previous: bat35, current: bat20, lastAlertedThreshold: nil)
+        precondition(cross20.level == .warning && cross20.nextAlertedThreshold == 20, "Dropping to 20% must trigger warning")
+
+        let repeat19 = HardwareStatusLogic.lowBatteryAlertToTrigger(previous: bat20, current: bat19, lastAlertedThreshold: 20)
+        precondition(repeat19.level == nil && repeat19.nextAlertedThreshold == 20, "Staying in warning band must not re-alert")
+
+        let cross10 = HardwareStatusLogic.lowBatteryAlertToTrigger(previous: bat19, current: bat10, lastAlertedThreshold: 20)
+        precondition(cross10.level == .critical && cross10.nextAlertedThreshold == 10, "Dropping to 10% must escalate to critical")
+
+        let pluggedReset = HardwareStatusLogic.lowBatteryAlertToTrigger(previous: bat10, current: bat10Charging, lastAlertedThreshold: 10)
+        precondition(pluggedReset.level == nil && pluggedReset.nextAlertedThreshold == nil, "Charging must suppress alert and reset threshold")
+
+        let hpWarn = HardwareStatusLogic.headphoneLowBatteryAlertToTrigger(deviceName: "AirPods Pro", batteryPercent: 18, lastDeviceName: "AirPods Pro", lastAlertedThreshold: nil)
+        precondition(hpWarn.level == .warning && hpWarn.nextAlertedThreshold == 20, "Headphone 18% must trigger warning")
+        let hpRepeat = HardwareStatusLogic.headphoneLowBatteryAlertToTrigger(deviceName: "AirPods Pro", batteryPercent: 15, lastDeviceName: hpWarn.nextDeviceName, lastAlertedThreshold: hpWarn.nextAlertedThreshold)
+        precondition(hpRepeat.level == nil, "Headphone 15% after 18% must not spam")
+        let hpCritical = HardwareStatusLogic.headphoneLowBatteryAlertToTrigger(deviceName: "AirPods Pro", batteryPercent: 10, lastDeviceName: hpRepeat.nextDeviceName, lastAlertedThreshold: hpRepeat.nextAlertedThreshold)
+        precondition(hpCritical.level == .critical && hpCritical.nextAlertedThreshold == 10, "Headphone 10% must escalate to critical")
     }
 
     private static func checkUpdateLogic() {
@@ -923,6 +991,29 @@ enum CoreSelfCheck {
             !NotchGeometry.isPointInLeftCompactZone(point: CGPoint(x: 910, y: 960), panelFrame: compactPanel, centerGapWidth: gapWidth),
             "Right wing must not count as left control zone"
         )
+    }
+
+    private static func checkTerminalSessionLogic() {
+        let f = TerminalSessionLogic.fieldSeparator
+        let r = TerminalSessionLogic.rowSeparator
+        let raw = [
+            ["101", "1", "/dev/ttys001", "API Server", "floqy-api", "1", "login,-zsh,node"].joined(separator: f),
+            ["101", "1", "/dev/ttys001", "Duplicate", "dup", "0", "zsh"].joined(separator: f),
+            ["102", "2", "/dev/ttys002", "", "Documents — -zsh", "0", "login,-zsh"].joined(separator: f),
+            ["bad-row"].joined(separator: f)
+        ].joined(separator: r)
+
+        let parsed = TerminalSessionLogic.parseTerminalSnapshot(raw)
+        precondition(parsed.count == 2, "Expected 2 unique valid terminal sessions, got \(parsed.count)")
+        precondition(parsed[0].displayName == "API Server", "Custom title must take priority")
+        precondition(parsed[0].activeProcessLabel == "node", "Expected active process 'node', got \(parsed[0].activeProcessLabel)")
+        precondition(parsed[0].isBusy, "Busy flag mismatch")
+
+        precondition(parsed[1].displayName == "Documents — -zsh", "Window title fallback mismatch")
+        precondition(parsed[1].activeProcessLabel == "-zsh", "Shell fallback mismatch: \(parsed[1].activeProcessLabel)")
+
+        let escaped = TerminalSessionLogic.escapeAppleScriptString("API \"v2\"\\n\nline")
+        precondition(escaped == "API \\\"v2\\\"\\\\n line", "AppleScript escaping mismatch: \(escaped)")
     }
 }
 

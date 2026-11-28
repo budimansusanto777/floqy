@@ -353,13 +353,13 @@ struct NotchCompactView: View {
                 }
             }
         case .meeting:
-            let provider = manager.meetingHeadsUp?.event.meetingProvider ?? "Meeting"
-            let isMeet = provider == "Google Meet"
+            let hasMeetingLink = manager.meetingHeadsUp?.event.meetingURL != nil
+            let isMeet = manager.meetingHeadsUp?.event.meetingProvider == "Google Meet"
             let minutes = manager.meetingHeadsUp?.minutesRemaining ?? 5
             HStack(spacing: 4) {
-                Image(systemName: "video.fill")
+                Image(systemName: hasMeetingLink ? "video.fill" : "calendar")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(isMeet ? NotchColors.statusHealthy : NotchColors.accentPrimary)
+                    .foregroundStyle(isMeet ? NotchColors.statusHealthy : (hasMeetingLink ? NotchColors.accentPrimary : NotchColors.statusWarning))
                 Text("in \(minutes)m")
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(NotchColors.statusWarning)
@@ -404,12 +404,12 @@ struct NotchCompactView: View {
                     .lineLimit(1)
             }
         case .meeting:
-            let provider = manager.meetingHeadsUp?.event.meetingProvider ?? "Meeting"
-            let isMeet = provider == "Google Meet"
+            let hasMeetingLink = manager.meetingHeadsUp?.event.meetingURL != nil
+            let isMeet = manager.meetingHeadsUp?.event.meetingProvider == "Google Meet"
             HStack(spacing: 5) {
-                Image(systemName: "video.fill")
+                Image(systemName: hasMeetingLink ? "video.fill" : "calendar")
                     .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(isMeet ? NotchColors.statusHealthy : NotchColors.accentPrimary)
+                    .foregroundStyle(isMeet ? NotchColors.statusHealthy : (hasMeetingLink ? NotchColors.accentPrimary : NotchColors.statusWarning))
                 Text(manager.meetingHeadsUp?.event.title ?? "Upcoming Meeting")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(NotchColors.textPrimary)
@@ -637,7 +637,7 @@ struct NotchAlertView: View {
                 switch alert {
                 case .aiFinished(let agent):
                     manager.openAgentFromAlert(agent)
-                case .headphonesConnected, .chargingConnected:
+                case .headphonesConnected, .chargingConnected, .lowBattery, .headphoneLowBattery:
                     manager.dismissActiveAlert()
                 case .pomodoroComplete, .meetingStarting:
                     manager.setMode(.expanded)
@@ -882,9 +882,11 @@ struct NotchAlertView: View {
                             )
                     )
             }
-        case .meetingStarting(_, _, let provider, _):
-            let accent = provider == "Google Meet" ? NotchColors.statusHealthy : NotchColors.accentPrimary
-            Image(systemName: "video.fill")
+        case .meetingStarting(_, _, let provider, let url):
+            let accent = url == nil
+                ? NotchColors.statusWarning
+                : (provider == "Google Meet" ? NotchColors.statusHealthy : NotchColors.accentPrimary)
+            Image(systemName: url == nil ? "calendar" : "video.fill")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(accent)
                 .frame(width: 32, height: 32)
@@ -911,6 +913,28 @@ struct NotchAlertView: View {
                                 .stroke(NotchColors.cardBorder, lineWidth: 1)
                         )
                 )
+        case .lowBattery(_, let isCritical):
+            let tint = isCritical ? NotchColors.statusAlert : NotchColors.statusWarning
+            Image(systemName: isCritical ? "battery.0percent" : "battery.25percent")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 36, height: 36)
+                .background(
+                    Circle()
+                        .fill(tint.opacity(0.16))
+                        .overlay(Circle().stroke(tint.opacity(0.35), lineWidth: 1))
+                )
+        case .headphoneLowBattery(_, _, let isAirPods, let isCritical):
+            let tint = isCritical ? NotchColors.statusAlert : NotchColors.statusWarning
+            Image(systemName: isAirPods ? "airpodspro" : "headphones")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(tint)
+                .frame(width: 36, height: 36)
+                .background(
+                    Circle()
+                        .fill(tint.opacity(0.16))
+                        .overlay(Circle().stroke(tint.opacity(0.35), lineWidth: 1))
+                )
         case .chargingConnected, .cameraMirror, .updating:
             EmptyView()
         }
@@ -936,7 +960,7 @@ struct NotchAlertView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(NotchColors.textPrimary)
                     .lineLimit(1)
-                Text("\(provider) • Starting now")
+                Text(provider.map { "\($0) • Starting now" } ?? "Starting now")
                     .font(.system(size: 10.5))
                     .foregroundStyle(NotchColors.textSecondary)
                     .lineLimit(1)
@@ -959,6 +983,28 @@ struct NotchAlertView: View {
                     .foregroundStyle(NotchColors.textPrimary)
                     .lineLimit(1)
                 Text("Connected · Audio Output")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(NotchColors.textSecondary)
+                    .lineLimit(1)
+            }
+        case .lowBattery(_, let isCritical):
+            VStack(alignment: .leading, spacing: 2) {
+                Text(isCritical ? "Battery Critically Low" : "Low Battery")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(NotchColors.textPrimary)
+                    .lineLimit(1)
+                Text(isCritical ? "Plug in charger now" : "Plug in your MacBook soon")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(NotchColors.textSecondary)
+                    .lineLimit(1)
+            }
+        case .headphoneLowBattery(let name, _, _, let isCritical):
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(NotchColors.textPrimary)
+                    .lineLimit(1)
+                Text(isCritical ? "Battery critically low" : "Headphone battery low")
                     .font(.system(size: 10.5))
                     .foregroundStyle(NotchColors.textSecondary)
                     .lineLimit(1)
@@ -994,15 +1040,17 @@ struct NotchAlertView: View {
             }
         case .meetingStarting(_, _, _, let url):
             HStack(spacing: 6) {
-                Button("Join") {
-                    manager.joinMeetingFromAlert(url)
+                if let url {
+                    Button("Join") {
+                        manager.joinMeetingFromAlert(url)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(NotchColors.accentForeground)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 7).fill(NotchColors.accentPrimary))
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(NotchColors.accentForeground)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(RoundedRectangle(cornerRadius: 7).fill(NotchColors.accentPrimary))
 
                 Button {
                     manager.dismissActiveAlert()
@@ -1034,23 +1082,10 @@ struct NotchAlertView: View {
             }
         case .headphonesConnected(_, let batteryPercent, _):
             if let batteryPercent {
-                let fraction = CGFloat(min(100, max(0, batteryPercent))) / 100.0
-                HStack(spacing: 7) {
-                    Text("\(batteryPercent)%")
-                        .font(.system(size: 13.5, weight: .semibold, design: .monospaced))
-                        .monospacedDigit()
-                        .foregroundStyle(NotchColors.statusHealthy)
-
-                    ZStack {
-                        Circle()
-                            .stroke(NotchColors.trackBackground, lineWidth: 2.5)
-                        Circle()
-                            .trim(from: 0, to: fraction)
-                            .stroke(NotchColors.statusHealthy, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
-                    }
-                    .frame(width: 24, height: 24)
-                }
+                let tint = batteryPercent <= 10
+                    ? NotchColors.statusAlert
+                    : (batteryPercent <= 20 ? NotchColors.statusWarning : NotchColors.statusHealthy)
+                batteryGaugeRing(percent: batteryPercent, tint: tint)
             } else {
                 Text("Connected")
                     .font(.system(size: 10.5, weight: .semibold))
@@ -1059,8 +1094,38 @@ struct NotchAlertView: View {
                     .padding(.vertical, 4)
                     .background(Capsule().fill(NotchColors.statusHealthy.opacity(0.14)))
             }
+        case .lowBattery(let percentage, let isCritical):
+            batteryGaugeRing(
+                percent: percentage,
+                tint: isCritical ? NotchColors.statusAlert : NotchColors.statusWarning
+            )
+        case .headphoneLowBattery(_, let batteryPercent, _, let isCritical):
+            batteryGaugeRing(
+                percent: batteryPercent,
+                tint: isCritical ? NotchColors.statusAlert : NotchColors.statusWarning
+            )
         case .chargingConnected, .cameraMirror, .updating:
             EmptyView()
+        }
+    }
+
+    private func batteryGaugeRing(percent: Int, tint: Color) -> some View {
+        let fraction = CGFloat(min(100, max(0, percent))) / 100.0
+        return HStack(spacing: 7) {
+            Text("\(percent)%")
+                .font(.system(size: 13.5, weight: .semibold, design: .monospaced))
+                .monospacedDigit()
+                .foregroundStyle(tint)
+
+            ZStack {
+                Circle()
+                    .stroke(NotchColors.trackBackground, lineWidth: 2.5)
+                Circle()
+                    .trim(from: 0, to: fraction)
+                    .stroke(tint, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: 24, height: 24)
         }
     }
 }
@@ -1076,7 +1141,7 @@ struct EqualizerBarsView: View {
 
     var body: some View {
         let count = max(1, min(4, barCount))
-        TimelineView(.animation(paused: !isPlaying || reduceMotion)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !isPlaying || reduceMotion)) { context in
             let t = context.date.timeIntervalSinceReferenceDate
             HStack(alignment: .bottom, spacing: 2) {
                 ForEach(0..<count, id: \.self) { index in

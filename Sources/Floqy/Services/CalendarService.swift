@@ -8,6 +8,7 @@ struct CalendarEventItem: Identifiable, Equatable {
     let title: String
     let startDate: Date
     let endDate: Date
+    let isAllDay: Bool
     let timeRangeText: String
     let meetingURL: URL?
     let meetingProvider: String?
@@ -25,11 +26,13 @@ final class CalendarService: ObservableObject {
     @Published var selectedDate: Date
     @Published private(set) var now: Date = Date()
 
-    private var store = EKEventStore()
+    private var store: EKEventStore?
     private var storeObserver: NSObjectProtocol?
     private var refreshTimer: Timer?
+    private var delayedRefreshTask: Task<Void, Never>?
     private var refreshTickCount = 0
     private var lastRefreshDayKey = CalendarLogic.dayKey(for: Date())
+    private var lastRefreshDate: Date = .distantPast
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -47,15 +50,18 @@ final class CalendarService: ObservableObject {
     func start() {
         stop()
         authorizationStatus = EKEventStore.authorizationStatus(for: .event)
-        attachStoreObserver()
 
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.now = Date()
                 self.refreshTickCount += 1
+                let latestStatus = EKEventStore.authorizationStatus(for: .event)
                 let hasEndedUpcoming = self.upcomingEvents.contains { $0.endDate <= self.now }
-                if self.refreshTickCount >= 20 || hasEndedUpcoming || CalendarLogic.dayKey(for: self.now) != self.lastRefreshDayKey {
+                if latestStatus != self.authorizationStatus
+                    || self.refreshTickCount >= 4
+                    || hasEndedUpcoming
+                    || CalendarLogic.dayKey(for: self.now) != self.lastRefreshDayKey {
                     self.refreshEvents()
                 }
             }
@@ -65,10 +71,9 @@ final class CalendarService: ObservableObject {
     }
 
     func stop() {
-        if let storeObserver {
-            NotificationCenter.default.removeObserver(storeObserver)
-            self.storeObserver = nil
-        }
+        delayedRefreshTask?.cancel()
+        delayedRefreshTask = nil
+        clearStore()
         refreshTimer?.invalidate()
         refreshTimer = nil
     }
@@ -77,12 +82,18 @@ final class CalendarService: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             NSApp.activate(ignoringOtherApps: true)
-            _ = try? await store.requestFullAccessToEvents()
-            // Recreate EKEventStore after permission grant so cached empty sources reload cleanly.
-            store = EKEventStore()
-            attachStoreObserver()
-            store.refreshSourcesIfNecessary()
+            let initialStore = ensureStore()
+            _ = try? await initialStore.requestFullAccessToEvents()
             authorizationStatus = EKEventStore.authorizationStatus(for: .event)
+            if authorizationStatus == .fullAccess {
+                // Recreate EKEventStore after permission grant so cached empty sources reload cleanly.
+                let freshStore = EKEventStore()
+                store = freshStore
+                attachStoreObserver(to: freshStore)
+                freshStore.refreshSourcesIfNecessary()
+            } else {
+                clearStore()
+            }
             refreshEvents()
         }
     }
@@ -107,12 +118,31 @@ final class CalendarService: ObservableObject {
         !(monthEventsByDay[CalendarLogic.dayKey(for: date)] ?? []).isEmpty
     }
 
+    func forceRefresh() {
+        refreshEvents()
+        delayedRefreshTask?.cancel()
+        delayedRefreshTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2.5))
+            guard !Task.isCancelled else { return }
+            self?.refreshEvents()
+        }
+    }
+
+    func refreshIfStale(minInterval: TimeInterval = 15) {
+        let latestStatus = EKEventStore.authorizationStatus(for: .event)
+        if latestStatus != authorizationStatus || Date().timeIntervalSince(lastRefreshDate) >= minInterval {
+            refreshEvents()
+        }
+    }
+
     func refreshEvents() {
         now = Date()
         refreshTickCount = 0
+        lastRefreshDate = now
         lastRefreshDayKey = CalendarLogic.dayKey(for: now)
         authorizationStatus = EKEventStore.authorizationStatus(for: .event)
         guard authorizationStatus == .fullAccess else {
+            clearStore()
             syncedCalendarCount = 0
             syncedCalendarNames = []
             upcomingEvents = []
@@ -120,8 +150,10 @@ final class CalendarService: ObservableObject {
             return
         }
 
-        store.refreshSourcesIfNecessary()
-        let calendars = store.calendars(for: .event)
+        let eventStore = ensureStore()
+        eventStore.reset()
+        eventStore.refreshSourcesIfNecessary()
+        let calendars = eventStore.calendars(for: .event)
         syncedCalendarCount = calendars.count
         syncedCalendarNames = calendars.map(\.title)
 
@@ -138,9 +170,9 @@ final class CalendarService: ObservableObject {
 
         let queryStart = min(monthBounds.start, upcomingStart)
         let queryEnd = max(monthBounds.end, upcomingEnd)
-        let predicate = store.predicateForEvents(withStart: queryStart, end: queryEnd, calendars: calendars)
+        let predicate = eventStore.predicateForEvents(withStart: queryStart, end: queryEnd, calendars: calendars)
 
-        let sortedItems: [CalendarEventItem] = store.events(matching: predicate)
+        let sortedItems: [CalendarEventItem] = eventStore.events(matching: predicate)
             .sorted { lhs, rhs in
                 if lhs.startDate != rhs.startDate {
                     return lhs.startDate < rhs.startDate
@@ -151,6 +183,7 @@ final class CalendarService: ObservableObject {
                 let meetingURL = CalendarLogic.extractMeetingURL(from: [
                     event.url?.absoluteString,
                     event.location,
+                    event.structuredLocation?.title,
                     event.notes
                 ])
                 let provider = meetingURL.flatMap { CalendarLogic.meetingProvider(for: $0) }
@@ -165,29 +198,50 @@ final class CalendarService: ObservableObject {
                     title: (fallbackTitle?.isEmpty == false ? fallbackTitle! : "Untitled Event"),
                     startDate: event.startDate,
                     endDate: event.endDate,
+                    isAllDay: event.isAllDay,
                     timeRangeText: rangeText,
                     meetingURL: meetingURL,
                     meetingProvider: provider
                 )
             }
 
-        upcomingEvents = Array(
-            sortedItems
-                .filter { $0.endDate > currentDate && $0.startDate <= upcomingEnd }
-                .prefix(3)
+        upcomingEvents = CalendarLogic.prioritizeUpcoming(
+            sortedItems,
+            isAllDay: \.isAllDay,
+            startDate: \.startDate,
+            endDate: \.endDate,
+            now: currentDate,
+            upcomingEnd: upcomingEnd,
+            limit: 10
         )
         monthEventsByDay = Dictionary(grouping: sortedItems.filter {
             $0.startDate >= monthBounds.start && $0.startDate < monthBounds.end
         }) { CalendarLogic.dayKey(for: $0.startDate) }
     }
 
-    private func attachStoreObserver() {
+    private func ensureStore() -> EKEventStore {
+        if let store { return store }
+        let created = EKEventStore()
+        store = created
+        attachStoreObserver(to: created)
+        return created
+    }
+
+    private func clearStore() {
+        if let storeObserver {
+            NotificationCenter.default.removeObserver(storeObserver)
+            self.storeObserver = nil
+        }
+        store = nil
+    }
+
+    private func attachStoreObserver(to eventStore: EKEventStore) {
         if let storeObserver {
             NotificationCenter.default.removeObserver(storeObserver)
         }
         storeObserver = NotificationCenter.default.addObserver(
             forName: .EKEventStoreChanged,
-            object: store,
+            object: eventStore,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in

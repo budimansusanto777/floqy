@@ -10,8 +10,8 @@ final class CameraMirrorService: ObservableObject {
     @Published private(set) var isRunning: Bool = false
     @Published private(set) var errorMessage: String?
     @Published var isMirrored: Bool = true
+    @Published private(set) var session: AVCaptureSession?
 
-    nonisolated let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "floqy.camera.mirror")
 
     func start() {
@@ -43,7 +43,8 @@ final class CameraMirrorService: ObservableObject {
 
     func stop() {
         isRunning = false
-        let captureSession = session
+        guard let captureSession = session else { return }
+        session = nil
         sessionQueue.async {
             if captureSession.isRunning {
                 captureSession.stopRunning()
@@ -61,11 +62,15 @@ final class CameraMirrorService: ObservableObject {
     }
 
     private func startSessionOnQueue() {
-        let captureSession = session
+        let captureSession = session ?? AVCaptureSession()
+        if session == nil {
+            session = captureSession
+        }
         sessionQueue.async { [weak self] in
             guard let device = AVCaptureDevice.default(for: .video) else {
                 Task { @MainActor [weak self] in
                     self?.isRunning = false
+                    self?.session = nil
                     self?.errorMessage = "No camera detected."
                 }
                 return
@@ -86,6 +91,7 @@ final class CameraMirrorService: ObservableObject {
                     captureSession.commitConfiguration()
                     Task { @MainActor [weak self] in
                         self?.isRunning = false
+                        self?.session = nil
                         self?.errorMessage = "Could not attach camera input."
                     }
                     return
@@ -98,12 +104,24 @@ final class CameraMirrorService: ObservableObject {
                 }
 
                 Task { @MainActor [weak self] in
-                    self?.isRunning = true
-                    self?.errorMessage = nil
+                    guard let self, self.session === captureSession else {
+                        self?.sessionQueue.async {
+                            if captureSession.isRunning {
+                                captureSession.stopRunning()
+                            }
+                            for existing in captureSession.inputs {
+                                captureSession.removeInput(existing)
+                            }
+                        }
+                        return
+                    }
+                    self.isRunning = true
+                    self.errorMessage = nil
                 }
             } catch {
                 Task { @MainActor [weak self] in
                     self?.isRunning = false
+                    self?.session = nil
                     self?.errorMessage = "Camera unavailable: \(error.localizedDescription)"
                 }
             }
@@ -113,7 +131,7 @@ final class CameraMirrorService: ObservableObject {
 
 /// Hosts an AVCaptureVideoPreviewLayer with live mirror toggling.
 struct CameraPreviewLayerView: NSViewRepresentable {
-    let session: AVCaptureSession
+    let session: AVCaptureSession?
     let isMirrored: Bool
     let isRunning: Bool
 
@@ -127,6 +145,10 @@ struct CameraPreviewLayerView: NSViewRepresentable {
     func updateNSView(_ nsView: CameraPreviewNSView, context: Context) {
         nsView.attachSession(session)
         nsView.applyMirror(isMirrored)
+    }
+
+    static func dismantleNSView(_ nsView: CameraPreviewNSView, coordinator: ()) {
+        nsView.attachSession(nil)
     }
 }
 
@@ -159,11 +181,14 @@ final class CameraPreviewNSView: NSView {
         applyMirror(desiredMirrored)
     }
 
-    func attachSession(_ session: AVCaptureSession) {
-        if previewLayer.session !== session {
-            previewLayer.session = session
+    func attachSession(_ session: AVCaptureSession?) {
+        guard previewLayer.session !== session else { return }
+        if let startObserver {
+            NotificationCenter.default.removeObserver(startObserver)
+            self.startObserver = nil
         }
-        guard startObserver == nil else { return }
+        previewLayer.session = session
+        guard let session else { return }
         startObserver = NotificationCenter.default.addObserver(
             forName: AVCaptureSession.didStartRunningNotification,
             object: session,

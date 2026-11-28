@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import ImageIO
 
 /// Lightweight NSPasteboard watcher storing recent text, code, URLs, and image thumbnails.
 @MainActor
@@ -11,6 +12,14 @@ final class ClipboardService: ObservableObject {
     private var timer: Timer?
     private var lastChangeCount: Int = NSPasteboard.general.changeCount
     private let maxEntries = 40
+
+    private static var clipboardTempDir: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("FloqyClipboard", isDirectory: true)
+    }
+
+    init() {
+        try? FileManager.default.removeItem(at: Self.clipboardTempDir)
+    }
 
     var filteredEntries: [ClipboardEntry] {
         ClipboardLogic.filterAndSort(entries, query: searchQuery)
@@ -33,13 +42,19 @@ final class ClipboardService: ObservableObject {
     func stop() {
         timer?.invalidate()
         timer = nil
+        for entry in entries {
+            cleanupTempFile(entry.fullImageURL)
+        }
+        try? FileManager.default.removeItem(at: Self.clipboardTempDir)
     }
 
     func copyToPasteboard(_ entry: ClipboardEntry) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
 
-        if entry.kind == .image, let data = entry.fullImageData ?? entry.imageData, let image = NSImage(data: data) {
+        if entry.kind == .image,
+           let data = entry.fullImageURL.flatMap({ try? Data(contentsOf: $0) }) ?? entry.imageData,
+           let image = NSImage(data: data) {
             pasteboard.writeObjects([image])
         } else {
             pasteboard.setString(entry.textContent, forType: .string)
@@ -53,10 +68,16 @@ final class ClipboardService: ObservableObject {
     }
 
     func delete(_ id: UUID) {
+        for entry in entries where entry.id == id {
+            cleanupTempFile(entry.fullImageURL)
+        }
         entries.removeAll { $0.id == id }
     }
 
     func clearUnpinned() {
+        for entry in entries where !entry.isPinned {
+            cleanupTempFile(entry.fullImageURL)
+        }
         entries.removeAll { !$0.isPinned }
     }
 
@@ -83,12 +104,15 @@ final class ClipboardService: ObservableObject {
         }
 
         if let imageData = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff),
-           let image = NSImage(data: imageData),
-           let thumbData = downscaledPNGData(for: image, maxSide: 96) {
-            // shortcut: keeps at most 5 full-res images in RAM (<=10MB each), spill to temp files if users copy larger sets
-            let fullData = imageData.count <= 10_000_000 ? imageData : downscaledPNGData(for: image, maxSide: 1600)
-            let sizeLabel = "Image (\(Int(image.size.width)) × \(Int(image.size.height)))"
-            insertEntry(ClipboardEntry(kind: .image, textContent: sizeLabel, imageData: thumbData, fullImageData: fullData))
+           let thumb = downscaledPNGAndSize(from: imageData, maxPixelSize: 96) {
+            // Spill full-res image bytes to /tmp so RAM only holds the 96px thumbnail.
+            let fullData = imageData.count <= 10_000_000
+                ? imageData
+                : downscaledPNGAndSize(from: imageData, maxPixelSize: 1600)?.pngData
+            let entryID = UUID()
+            let fullURL = fullData.flatMap { writeTempImage($0, id: entryID) }
+            let sizeLabel = "Image (\(thumb.pixelWidth) × \(thumb.pixelHeight))"
+            insertEntry(ClipboardEntry(id: entryID, kind: .image, textContent: sizeLabel, imageData: thumb.pngData, fullImageURL: fullURL))
         }
     }
 
@@ -96,6 +120,7 @@ final class ClipboardService: ObservableObject {
         entries.insert(entry, at: 0)
         while entries.filter({ $0.kind == .image }).count > 5 {
             if let oldestUnpinnedImage = entries.lastIndex(where: { $0.kind == .image && !$0.isPinned }) {
+                cleanupTempFile(entries[oldestUnpinnedImage].fullImageURL)
                 entries.remove(at: oldestUnpinnedImage)
             } else {
                 break
@@ -103,26 +128,46 @@ final class ClipboardService: ObservableObject {
         }
         while entries.count > maxEntries {
             if let lastUnpinned = entries.lastIndex(where: { !$0.isPinned }) {
+                cleanupTempFile(entries[lastUnpinned].fullImageURL)
                 entries.remove(at: lastUnpinned)
             } else {
+                cleanupTempFile(entries.last?.fullImageURL)
                 entries.removeLast()
             }
         }
     }
 
-    private func downscaledPNGData(for image: NSImage, maxSide: CGFloat) -> Data? {
-        let original = image.size
-        guard original.width > 0, original.height > 0 else { return nil }
-        let ratio = min(1.0, maxSide / max(original.width, original.height))
-        let targetSize = NSSize(width: max(1, round(original.width * ratio)), height: max(1, round(original.height * ratio)))
+    private func writeTempImage(_ data: Data, id: UUID) -> URL? {
+        let dir = Self.clipboardTempDir
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("\(id.uuidString).img")
+        do {
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
+        }
+    }
 
-        let resized = NSImage(size: targetSize)
-        resized.lockFocus()
-        image.draw(in: NSRect(origin: .zero, size: targetSize), from: NSRect(origin: .zero, size: original), operation: .copy, fraction: 1.0)
-        resized.unlockFocus()
+    private func cleanupTempFile(_ url: URL?) {
+        guard let url else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
 
-        guard let tiff = resized.tiffRepresentation,
-              let rep = NSBitmapImageRep(data: tiff) else { return nil }
-        return rep.representation(using: .png, properties: [:])
+    private func downscaledPNGAndSize(from data: Data, maxPixelSize: Int) -> (pngData: Data, pixelWidth: Int, pixelHeight: Int)? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let pixelW = props?[kCGImagePropertyPixelWidth] as? Int ?? 0
+        let pixelH = props?[kCGImagePropertyPixelHeight] as? Int ?? 0
+
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+        ]
+        guard let cgThumb = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        let rep = NSBitmapImageRep(cgImage: cgThumb)
+        guard let pngData = rep.representation(using: .png, properties: [:]) else { return nil }
+        return (pngData, max(pixelW, cgThumb.width), max(pixelH, cgThumb.height))
     }
 }

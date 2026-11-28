@@ -165,7 +165,7 @@ struct ClipboardEntry: Identifiable, Equatable {
     let kind: ClipboardEntryKind
     let textContent: String
     let imageData: Data?
-    let fullImageData: Data?
+    let fullImageURL: URL?
     var isPinned: Bool
     let createdAt: Date
 
@@ -174,7 +174,7 @@ struct ClipboardEntry: Identifiable, Equatable {
         kind: ClipboardEntryKind,
         textContent: String,
         imageData: Data? = nil,
-        fullImageData: Data? = nil,
+        fullImageURL: URL? = nil,
         isPinned: Bool = false,
         createdAt: Date = Date()
     ) {
@@ -182,7 +182,7 @@ struct ClipboardEntry: Identifiable, Equatable {
         self.kind = kind
         self.textContent = textContent
         self.imageData = imageData
-        self.fullImageData = fullImageData
+        self.fullImageURL = fullImageURL
         self.isPinned = isPinned
         self.createdAt = createdAt
     }

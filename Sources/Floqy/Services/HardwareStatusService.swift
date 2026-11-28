@@ -19,13 +19,21 @@ final class HardwareStatusService: ObservableObject {
 
     var onChargingConnected: ((BatteryStatus) -> Void)?
     var onHeadphonesConnected: ((HeadphoneStatus) -> Void)?
+    var onLowBattery: ((BatteryStatus, LowBatteryLevel) -> Void)?
+    var onHeadphoneLowBattery: ((HeadphoneStatus, LowBatteryLevel) -> Void)?
 
     private var powerRunLoopSource: CFRunLoopSource?
     private var audioListenerBlock: AudioObjectPropertyListenerBlock?
     private var lastObservedOutputName: String?
+    private var lastBatteryAlertThreshold: Int?
+    private var lastHeadphoneAlertDevice: String?
+    private var lastHeadphoneAlertThreshold: Int?
+    private var isBluetoothHeadphoneConnected = false
+    private var headphoneBatteryTimer: Timer?
     private var isStarted = false
 
     deinit {
+        headphoneBatteryTimer?.invalidate()
         if let source = powerRunLoopSource {
             CFRunLoopSourceInvalidate(source)
         }
@@ -45,17 +53,45 @@ final class HardwareStatusService: ObservableObject {
         isStarted = true
 
         // Capture initial baseline silently so app launch never flashes false connection cards.
-        battery = Self.readBatteryStatus()
+        let initialBattery = Self.readBatteryStatus()
+        battery = initialBattery
+        if let initialBattery {
+            lastBatteryAlertThreshold = HardwareStatusLogic.lowBatteryAlertToTrigger(
+                previous: nil,
+                current: initialBattery,
+                lastAlertedThreshold: nil
+            ).nextAlertedThreshold
+        } else {
+            lastBatteryAlertThreshold = nil
+        }
+
         let initialAudio = Self.readAudioRoute()
         lastObservedOutputName = initialAudio.deviceName
         headphones = initialAudio.headphones
+        isBluetoothHeadphoneConnected = initialAudio.headphones != nil && initialAudio.isBluetooth
+        if let initialHeadphones = initialAudio.headphones, initialAudio.isBluetooth {
+            let eval = HardwareStatusLogic.headphoneLowBatteryAlertToTrigger(
+                deviceName: initialHeadphones.name,
+                batteryPercent: initialHeadphones.batteryPercent,
+                lastDeviceName: nil,
+                lastAlertedThreshold: nil
+            )
+            lastHeadphoneAlertDevice = eval.nextDeviceName
+            lastHeadphoneAlertThreshold = eval.nextAlertedThreshold
+        } else {
+            lastHeadphoneAlertDevice = nil
+            lastHeadphoneAlertThreshold = nil
+        }
 
         registerPowerSourceObserver()
         registerAudioOutputObserver()
+        syncHeadphoneBatteryTimer()
     }
 
     func stop() {
         isStarted = false
+        headphoneBatteryTimer?.invalidate()
+        headphoneBatteryTimer = nil
         if let source = powerRunLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode)
             CFRunLoopSourceInvalidate(source)
@@ -118,6 +154,15 @@ final class HardwareStatusService: ObservableObject {
         if HardwareStatusLogic.shouldTriggerChargingCard(previous: previous, current: current) {
             onChargingConnected?(current)
         }
+        let lowEval = HardwareStatusLogic.lowBatteryAlertToTrigger(
+            previous: previous,
+            current: current,
+            lastAlertedThreshold: lastBatteryAlertThreshold
+        )
+        lastBatteryAlertThreshold = lowEval.nextAlertedThreshold
+        if let level = lowEval.level {
+            onLowBattery?(current, level)
+        }
     }
 
     private func handleAudioOutputChange() {
@@ -125,12 +170,64 @@ final class HardwareStatusService: ObservableObject {
         let previousName = lastObservedOutputName
         lastObservedOutputName = route.deviceName
         headphones = route.headphones
+        isBluetoothHeadphoneConnected = route.headphones != nil && route.isBluetooth
 
         if HardwareStatusLogic.shouldTriggerHeadphoneCard(previousDeviceName: previousName, current: route.headphones) {
-            // Re-read Bluetooth HID battery shortly after route switch so AirPods report fresh percentage.
             if let initial = route.headphones {
                 onHeadphonesConnected?(initial)
+                if route.isBluetooth {
+                    let seed = HardwareStatusLogic.headphoneLowBatteryAlertToTrigger(
+                        deviceName: initial.name,
+                        batteryPercent: initial.batteryPercent,
+                        lastDeviceName: nil,
+                        lastAlertedThreshold: nil
+                    )
+                    lastHeadphoneAlertDevice = seed.nextDeviceName
+                    lastHeadphoneAlertThreshold = seed.nextAlertedThreshold
+                } else {
+                    lastHeadphoneAlertDevice = nil
+                    lastHeadphoneAlertThreshold = nil
+                }
             }
+        } else if route.headphones == nil {
+            lastHeadphoneAlertDevice = nil
+            lastHeadphoneAlertThreshold = nil
+        }
+
+        syncHeadphoneBatteryTimer()
+    }
+
+    private func syncHeadphoneBatteryTimer() {
+        headphoneBatteryTimer?.invalidate()
+        headphoneBatteryTimer = nil
+        guard isBluetoothHeadphoneConnected else { return }
+
+        headphoneBatteryTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.pollHeadphoneBattery()
+            }
+        }
+    }
+
+    private func pollHeadphoneBattery() {
+        guard isBluetoothHeadphoneConnected, let current = headphones else {
+            syncHeadphoneBatteryTimer()
+            return
+        }
+        let updatedPercent = Self.readBluetoothBatteryPercent(matchingName: current.name)
+        let updated = HeadphoneStatus(name: current.name, batteryPercent: updatedPercent, isAirPods: current.isAirPods)
+        headphones = updated
+
+        let eval = HardwareStatusLogic.headphoneLowBatteryAlertToTrigger(
+            deviceName: updated.name,
+            batteryPercent: updated.batteryPercent,
+            lastDeviceName: lastHeadphoneAlertDevice,
+            lastAlertedThreshold: lastHeadphoneAlertThreshold
+        )
+        lastHeadphoneAlertDevice = eval.nextDeviceName
+        lastHeadphoneAlertThreshold = eval.nextAlertedThreshold
+        if let level = eval.level {
+            onHeadphoneLowBattery?(updated, level)
         }
     }
 
@@ -167,7 +264,7 @@ final class HardwareStatusService: ObservableObject {
         return nil
     }
 
-    private static func readAudioRoute() -> (deviceName: String?, headphones: HeadphoneStatus?) {
+    private static func readAudioRoute() -> (deviceName: String?, headphones: HeadphoneStatus?, isBluetooth: Bool) {
         var address = defaultOutputPropertyAddress
         var deviceID = AudioDeviceID(kAudioObjectUnknown)
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)
@@ -181,7 +278,7 @@ final class HardwareStatusService: ObservableObject {
             &deviceID
         )
         guard status == noErr, deviceID != AudioDeviceID(kAudioObjectUnknown) else {
-            return (nil, nil)
+            return (nil, nil, false)
         }
 
         let name = readDeviceName(deviceID: deviceID) ?? "Audio Device"
@@ -194,12 +291,12 @@ final class HardwareStatusService: ObservableObject {
             isBluetooth: isBluetooth,
             isWiredHeadphonePort: isWiredHeadphone
         ) else {
-            return (name, nil)
+            return (name, nil, false)
         }
 
         let isAirPods = HardwareStatusLogic.isAirPodsName(name)
         let battery = isBluetooth ? readBluetoothBatteryPercent(matchingName: name) : nil
-        return (name, HeadphoneStatus(name: name, batteryPercent: battery, isAirPods: isAirPods))
+        return (name, HeadphoneStatus(name: name, batteryPercent: battery, isAirPods: isAirPods), isBluetooth)
     }
 
     private static func readDeviceName(deviceID: AudioDeviceID) -> String? {

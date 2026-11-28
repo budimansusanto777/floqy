@@ -187,7 +187,7 @@ struct NotchIdleView: View {
                 .opacity(isPointerActive && !reduceMotion ? 0 : 0.72)
 
             if !reduceMotion {
-                TimelineView(.animation(paused: !isPointerActive)) { context in
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPointerActive)) { context in
                     DualAcousticWaveCanvas(phase: context.date.timeIntervalSinceReferenceDate * 6.2)
                         .frame(width: 46, height: 12)
                 }
@@ -695,7 +695,7 @@ struct FloqyCalicoMascotView: View {
         let hopY: CGFloat = (mode == .done && !reduceMotion && !isCelebrating) ? 4 : 0
         let hopScale: CGFloat = (mode == .done && !reduceMotion && !isCelebrating) ? 0.9 : 1.0
 
-        TimelineView(.animation(paused: !animateLoop)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !animateLoop)) { context in
             let t = animateLoop ? context.date.timeIntervalSinceReferenceDate : 0
             Canvas { ctx, canvasSize in
                 drawCalico(in: &ctx, size: canvasSize, time: t)
@@ -1054,7 +1054,7 @@ struct FloqyPoodleMascotView: View {
         let hopY: CGFloat = (mode == .done && !reduceMotion && !isCelebrating) ? 4 : 0
         let hopScale: CGFloat = (mode == .done && !reduceMotion && !isCelebrating) ? 0.9 : 1.0
 
-        TimelineView(.animation(paused: !animateLoop)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !animateLoop)) { context in
             let t = animateLoop ? context.date.timeIntervalSinceReferenceDate : 0
             Canvas { ctx, canvasSize in
                 drawPoodle(in: &ctx, size: canvasSize, time: t)
@@ -1085,76 +1085,152 @@ struct FloqyPoodleMascotView: View {
         }
 
         if case .walking(let phase, let strideFactor) = mode {
-            let swingA = CGFloat(sin(phase)) * 22 * strideFactor
-            let swingB = CGFloat(sin(phase + .pi)) * 22 * strideFactor
-            let bounceY: CGFloat = CGFloat(-abs(sin(phase))) * 1.5 * strideFactor
-            let tailWag = CGFloat(sin(phase * 1.5 + 0.5)) * 14
-            let earBob = CGFloat(sin(phase)) * 5 * strideFactor
+            let activeStride: CGFloat = reduceMotion ? 0 : strideFactor
+            let furLight = Color(red: 242 / 255, green: 148 / 255, blue: 75 / 255)
+            let furMid = Color(red: 219 / 255, green: 107 / 255, blue: 39 / 255)
+            let furDark = Color(red: 185 / 255, green: 75 / 255, blue: 24 / 255)
+            let earTop = Color(red: 220 / 255, green: 110 / 255, blue: 41 / 255)
+            let earDeep = Color(red: 158 / 255, green: 60 / 255, blue: 18 / 255)
+            let snoutColor = Color(red: 244 / 255, green: 160 / 255, blue: 90 / 255)
+            let noseColor = Color(red: 42 / 255, green: 21 / 255, blue: 11 / 255)
+            let noseSheen = Color(red: 124 / 255, green: 81 / 255, blue: 61 / 255).opacity(0.65)
+            let eyeColor = Color(red: 35 / 255, green: 16 / 255, blue: 7 / 255)
+            let pawOuter = Color(red: 220 / 255, green: 110 / 255, blue: 41 / 255)
+            let pawInner = Color(red: 236 / 255, green: 142 / 255, blue: 72 / 255)
 
-            func fillLeg(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, angleDeg: CGFloat, color: Color) {
-                var local = context
-                local.translateBy(x: (x + w / 2) * sx, y: y * sy)
-                local.rotate(by: .degrees(angleDeg))
-                let rect = CGRect(x: (-w / 2) * sx, y: 0, width: w * sx, height: h * sy)
-                local.fill(Path(roundedRect: rect, cornerRadius: (w / 2) * sx), with: .color(color))
+            let furStops: [Gradient.Stop] = [
+                .init(color: furLight, location: 0),
+                .init(color: furMid, location: 0.55),
+                .init(color: furDark, location: 1)
+            ]
+
+            func fillEllipseIn(_ ctx: inout GraphicsContext, _ cx: CGFloat, _ cy: CGFloat, _ rx: CGFloat, _ ry: CGFloat, shading: GraphicsContext.Shading) {
+                let rect = CGRect(x: (cx - rx) * sx, y: (cy - ry) * sy, width: rx * 2 * sx, height: ry * 2 * sy)
+                ctx.fill(Path(ellipseIn: rect), with: shading)
             }
 
+            func fillCircleIn(_ ctx: inout GraphicsContext, _ cx: CGFloat, _ cy: CGFloat, _ r: CGFloat, shading: GraphicsContext.Shading) {
+                fillEllipseIn(&ctx, cx, cy, r, r, shading: shading)
+            }
+
+            func drawFloqyPaw(in ctx: inout GraphicsContext, x: CGFloat, y: CGFloat, legPhase: Double, scale: CGFloat, isFar: Bool) {
+                let xShift = CGFloat(cos(legPhase)) * 3.0 * scale * activeStride
+                let yLift = CGFloat(max(0, sin(legPhase))) * 3.2 * scale * activeStride
+                let tiltDeg = CGFloat(cos(legPhase)) * 14 * activeStride
+
+                var pawCtx = ctx
+                pawCtx.translateBy(x: (x + xShift) * sx, y: (y - yLift) * sy)
+                pawCtx.rotate(by: .degrees(tiltDeg))
+                if isFar {
+                    fillEllipseIn(&pawCtx, 0, 0, 4.5 * scale, 4.2 * scale, shading: .color(earDeep))
+                    fillEllipseIn(&pawCtx, 0, -0.4 * scale, 3.3 * scale, 2.7 * scale, shading: .color(furDark))
+                } else {
+                    fillEllipseIn(&pawCtx, 0, 0, 5.2 * scale, 4.6 * scale, shading: .color(pawOuter))
+                    fillEllipseIn(&pawCtx, 0.2 * scale, -0.5 * scale, 3.9 * scale, 3.1 * scale, shading: .color(pawInner))
+                }
+            }
+
+            // Squash, stretch & gentle chubby waddle pivoted at ground contact
+            let absSin = CGFloat(abs(sin(phase)))
+            let hopY = -absSin * 2.1 * activeStride
+            let sxSquash = 1.0 + (0.04 - absSin * 0.06) * activeStride
+            let syStretch = 1.0 + (-0.04 + absSin * 0.06) * activeStride
+            let waddleDeg = CGFloat(sin(phase)) * 2.4 * activeStride
+
+            var bodyCtx = context
+            bodyCtx.translateBy(x: 31 * sx, y: (43 + hopY) * sy)
+            bodyCtx.rotate(by: .degrees(waddleDeg))
+            bodyCtx.scaleBy(x: sxSquash, y: syStretch)
+            bodyCtx.translateBy(x: -31 * sx, y: -43 * sy)
+
             // Wagging curly pom-pom tail
-            var tailCtx = context
-            tailCtx.translateBy(x: 15 * sx, y: (25 + bounceY) * sy)
+            let tailWag = CGFloat(sin(phase * 1.45 + 0.4)) * 15 * (0.35 + 0.65 * activeStride)
+            var tailCtx = bodyCtx
+            tailCtx.translateBy(x: 14.5 * sx, y: 27.5 * sy)
             tailCtx.rotate(by: .degrees(tailWag))
             var tailPath = Path()
             tailPath.move(to: .zero)
-            tailPath.addQuadCurve(to: CGPoint(x: -4 * sx, y: -13 * sy), control: CGPoint(x: -5 * sx, y: -8 * sy))
-            tailCtx.stroke(tailPath, with: .color(Color(red: 185 / 255, green: 75 / 255, blue: 24 / 255)), style: StrokeStyle(lineWidth: 3.8 * sx, lineCap: .round))
-            tailCtx.fill(Path(ellipseIn: CGRect(x: -7.8 * sx, y: -17.8 * sy, width: 7.6 * sx, height: 7.6 * sy)), with: .color(Color(red: 242 / 255, green: 148 / 255, blue: 75 / 255)))
+            tailPath.addQuadCurve(to: CGPoint(x: -4.5 * sx, y: -11.5 * sy), control: CGPoint(x: -5 * sx, y: -5.5 * sy))
+            tailCtx.stroke(tailPath, with: .color(furDark), style: StrokeStyle(lineWidth: 3.8 * sx, lineCap: .round))
+            fillCircleIn(&tailCtx, -4.5, -12.5, 4.8, shading: .color(furLight))
 
-            // Far legs
-            fillLeg(16, 30 + bounceY, 5.0, 12.5, angleDeg: swingB, color: Color(red: 158 / 255, green: 60 / 255, blue: 18 / 255))
-            fillLeg(35, 30 + bounceY, 5.0, 12.5, angleDeg: swingA, color: Color(red: 158 / 255, green: 60 / 255, blue: 18 / 255))
+            // Far stubby paws
+            drawFloqyPaw(in: &bodyCtx, x: 21.5, y: 39.2, legPhase: Double(phase) + .pi, scale: 0.92, isFar: true)
+            drawFloqyPaw(in: &bodyCtx, x: 38.5, y: 39.2, legPhase: Double(phase), scale: 0.92, isFar: true)
 
-            // Fluffy cloud-puff body
+            // Plump cloud-puff body behind the head
             let bodyGradient = GraphicsContext.Shading.radialGradient(
-                Gradient(colors: [
-                    Color(red: 242 / 255, green: 148 / 255, blue: 75 / 255),
-                    Color(red: 219 / 255, green: 107 / 255, blue: 39 / 255),
-                    Color(red: 185 / 255, green: 75 / 255, blue: 24 / 255)
-                ]),
-                center: pt(28, 25 + bounceY),
+                Gradient(stops: furStops),
+                center: CGPoint(x: 27 * sx, y: 23.75 * sy),
+                startRadius: 2 * sx,
+                endRadius: 21 * sx
+            )
+            fillEllipseIn(&bodyCtx, 25.5, 30.2, 14.2, 10.6, shading: bodyGradient)
+            for (cx, cy, r) in [(CGFloat(18.0), CGFloat(29.5), CGFloat(8.2)), (28.0, 28.5, 9.8), (35.5, 29.8, 8.8)] {
+                fillCircleIn(&bodyCtx, cx, cy, r, shading: bodyGradient)
+            }
+
+            // Near stubby rounded paws matching sitting pose
+            drawFloqyPaw(in: &bodyCtx, x: 19.5, y: 40.0, legPhase: Double(phase), scale: 1.0, isFar: false)
+            drawFloqyPaw(in: &bodyCtx, x: 36.0, y: 40.0, legPhase: Double(phase) + .pi, scale: 1.0, isFar: false)
+
+            // 3/4 Floqy Poodle head
+            let headTilt = CGFloat(sin(phase)) * 2.2 * activeStride
+            let earBob = CGFloat(sin(phase - 0.7)) * 6.5 * activeStride
+            var headCtx = bodyCtx
+            headCtx.translateBy(x: 40.0 * sx, y: 20.5 * sy)
+            headCtx.rotate(by: .degrees(headTilt))
+
+            let earGradient = GraphicsContext.Shading.radialGradient(
+                Gradient(colors: [earTop, earDeep]),
+                center: CGPoint(x: 0, y: 2 * sy),
+                startRadius: 2 * sx,
+                endRadius: 28 * sx
+            )
+
+            // Far curly ear cluster
+            var farEarCtx = headCtx
+            farEarCtx.translateBy(x: 10.5 * sx, y: -1.5 * sy)
+            farEarCtx.rotate(by: .degrees(-earBob * 0.7))
+            for (cx, cy, r) in [(CGFloat(0.5), CGFloat(1.0), CGFloat(4.2)), (2.0, 5.5, 4.4), (0.2, 9.5, 3.6)] {
+                fillCircleIn(&farEarCtx, cx, cy, r, shading: earGradient)
+            }
+
+            // Near curly ear cluster
+            var nearEarCtx = headCtx
+            nearEarCtx.translateBy(x: -11.2 * sx, y: -1.2 * sy)
+            nearEarCtx.rotate(by: .degrees(earBob))
+            for (cx, cy, r) in [(CGFloat(0), CGFloat(0.5), CGFloat(5.2)), (-1.8, 5.8, 5.2), (-0.4, 10.8, 4.4)] {
+                fillCircleIn(&nearEarCtx, cx, cy, r, shading: earGradient)
+            }
+
+            // Crown puffs & face base
+            let headGradient = GraphicsContext.Shading.radialGradient(
+                Gradient(stops: furStops),
+                center: CGPoint(x: 0, y: -7 * sy),
                 startRadius: 2 * sx,
                 endRadius: 20 * sx
             )
-            for (cx, cy, r) in [(CGFloat(20), CGFloat(26), CGFloat(8.2)), (28, 24.5, 9.2), (36, 25.5, 8.5)] {
-                fillCircle(cx, cy, r, dy: bounceY, shading: bodyGradient)
+            let walkCrown: [(CGFloat, CGFloat, CGFloat)] = [
+                (0, -10.5, 7.2), (-6.8, -8.5, 5.8), (6.5, -8.2, 5.6), (-11.5, -4.5, 4.8), (10.2, -4.2, 4.5)
+            ]
+            for (cx, cy, r) in walkCrown {
+                fillCircleIn(&headCtx, cx, cy, r, shading: headGradient)
             }
+            fillEllipseIn(&headCtx, 0.5, 0.8, 13.8, 11.2, shading: headGradient)
 
-            // Near fluffy legs
-            fillLeg(19, 30.5 + bounceY, 5.4, 12.5, angleDeg: swingA, color: Color(red: 220 / 255, green: 110 / 255, blue: 41 / 255))
-            fillLeg(32.5, 30.5 + bounceY, 5.4, 12.5, angleDeg: swingB, color: Color(red: 242 / 255, green: 148 / 255, blue: 75 / 255))
+            // Warm snout + chocolate button nose
+            fillEllipseIn(&headCtx, 4.2, 5.2, 8.2, 5.4, shading: .color(snoutColor))
+            fillEllipseIn(&headCtx, 5.4, 3.1, 3.2, 2.0, shading: .color(noseColor))
+            fillEllipseIn(&headCtx, 4.7, 2.4, 1.0, 0.5, shading: .color(noseSheen))
 
-            // Head + crown puffs
-            let headBrown = Color(red: 219 / 255, green: 107 / 255, blue: 39 / 255)
-            for (cx, cy, r) in [(CGFloat(42), CGFloat(11), CGFloat(6.2)), (37, 13.5, 5.0), (47, 13.2, 5.2)] {
-                fillCircle(cx, cy, r, dy: bounceY, shading: .color(headBrown))
-            }
-            fillEllipse(43.5, 19.5, 10.5, 9.2, dy: bounceY, shading: .color(Color(red: 232 / 255, green: 130 / 255, blue: 58 / 255)))
-
-            // Warm snout + chocolate nose
-            fillEllipse(52.5, 22, 5.2, 3.8, dy: bounceY, shading: .color(Color(red: 244 / 255, green: 160 / 255, blue: 90 / 255)))
-            fillEllipse(56.5, 20.6, 2.2, 1.6, dy: bounceY, shading: .color(Color(red: 42 / 255, green: 21 / 255, blue: 11 / 255)))
-
-            // Eye + catchlight
-            fillCircle(47.2, 18.2, 2.1, dy: bounceY, shading: .color(Color(red: 35 / 255, green: 16 / 255, blue: 7 / 255)))
-            fillCircle(46.6, 17.5, 0.75, dy: bounceY, shading: .color(.white))
-
-            // Curly floppy ear bobbing with trot
-            var earCtx = context
-            earCtx.translateBy(x: 38 * sx, y: (17 + bounceY) * sy)
-            earCtx.rotate(by: .degrees(earBob))
-            let earDark = Color(red: 158 / 255, green: 60 / 255, blue: 18 / 255)
-            for (ex, ey, er) in [(CGFloat(0), CGFloat(3), CGFloat(4.4)), (-1.5, 7.5, 4.2), (1.2, 11, 3.6)] {
-                let rect = CGRect(x: (ex - er) * sx, y: (ey - er) * sy, width: er * 2 * sx, height: er * 2 * sy)
-                earCtx.fill(Path(ellipseIn: rect), with: .color(earDark))
+            // Two 3/4 expressive eyes + blink
+            let eyeScaleY: CGFloat = isBlinking ? 0.16 : 1.0
+            fillEllipseIn(&headCtx, -1.2, 0.4, 2.45, 2.45 * eyeScaleY, shading: .color(eyeColor))
+            fillEllipseIn(&headCtx, 10.2, 0.4, 2.15, 2.4 * eyeScaleY, shading: .color(eyeColor))
+            if !isBlinking {
+                fillCircleIn(&headCtx, -1.9, -0.5, 0.82, shading: .color(.white))
+                fillCircleIn(&headCtx, 9.6, -0.5, 0.72, shading: .color(.white))
             }
             return
         }
