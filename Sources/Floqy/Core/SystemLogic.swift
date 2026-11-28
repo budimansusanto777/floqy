@@ -248,7 +248,7 @@ enum UpdateLogic {
                 return clean
             }
         }
-        return "1.3.2"
+        return "1.4.0"
     }
 
     static func normalizedVersion(_ raw: String) -> String {
